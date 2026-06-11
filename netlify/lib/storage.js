@@ -21,7 +21,7 @@ function sortConversations(conversations) {
 }
 
 async function readJSON(store, key, fallback) {
-  const value = await store.get(key, { type: 'json', consistency: 'strong' });
+  const value = await store.get(key, { type: 'json' });
   return value ?? fallback;
 }
 

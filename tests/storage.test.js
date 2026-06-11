@@ -4,9 +4,11 @@ import { createConversationService } from '../netlify/lib/storage.js';
 class MemoryStore {
   constructor() {
     this.data = new Map();
+    this.getCalls = [];
   }
 
-  async get(key) {
+  async get(key, options) {
+    this.getCalls.push({ key, options });
     return this.data.get(key) ?? null;
   }
 
@@ -43,6 +45,18 @@ describe('conversation storage', () => {
     expect(stored.title).toBe('初次聊天');
     expect(stored.messages).toHaveLength(2);
     expect(stored.messages[0].content).toBe('你好');
+  });
+
+  it('uses default blob reads so manual Netlify deploys do not require uncachedEdgeURL', async () => {
+    const store = new MemoryStore();
+    const localService = createConversationService(store);
+
+    await localService.listConversations();
+
+    expect(store.getCalls[0]).toEqual({
+      key: 'conversation-index',
+      options: { type: 'json' },
+    });
   });
 
   it('sorts pinned conversations before recently updated conversations', async () => {
