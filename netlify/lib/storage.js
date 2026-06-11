@@ -33,6 +33,7 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
       })()
     : storeOrEvent;
   let cachedIndex = null;
+  const cachedConversations = new Map();
 
   async function readIndex() {
     if (cachedIndex) {
@@ -57,6 +58,31 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
     await store.setJSON(INDEX_KEY, cachedIndex);
   }
 
+  async function readConversationBody(id) {
+    if (cachedConversations.has(id)) {
+      return {
+        messages: cachedConversations.get(id).messages.map((item) => ({ ...item })),
+      };
+    }
+
+    const body = await readJSON(store, conversationKey(id), { messages: [] });
+    const normalized = {
+      messages: Array.isArray(body.messages) ? body.messages : [],
+    };
+    cachedConversations.set(id, normalized);
+    return {
+      messages: normalized.messages.map((item) => ({ ...item })),
+    };
+  }
+
+  async function writeConversationBody(id, body) {
+    const normalized = {
+      messages: Array.isArray(body.messages) ? body.messages : [],
+    };
+    cachedConversations.set(id, normalized);
+    await store.setJSON(conversationKey(id), normalized);
+  }
+
   async function getMetadata(id) {
     const index = await readIndex();
     return index.conversations.find((item) => item.id === id) ?? null;
@@ -79,7 +105,7 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
       };
       const index = await readIndex();
       index.conversations.push(metadata);
-      await store.setJSON(conversationKey(metadata.id), { messages: [] });
+      await writeConversationBody(metadata.id, { messages: [] });
       await writeIndex(index);
       return metadata;
     },
@@ -89,10 +115,10 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
       if (!metadata) {
         throw new Error('Conversation not found');
       }
-      const body = await readJSON(store, conversationKey(id), { messages: [] });
+      const body = await readConversationBody(id);
       return {
         ...metadata,
-        messages: Array.isArray(body.messages) ? body.messages : [],
+        messages: body.messages,
       };
     },
 
@@ -103,7 +129,7 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
         throw new Error('Conversation not found');
       }
 
-      const conversation = await readJSON(store, conversationKey(id), { messages: [] });
+      const conversation = await readConversationBody(id);
       const timestamp = nowIso();
       const normalizedMessages = messages.map((message) => ({
         id: message.id ?? randomUUID(),
@@ -112,7 +138,7 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
         createdAt: message.createdAt ?? timestamp,
       }));
 
-      await store.setJSON(conversationKey(id), {
+      await writeConversationBody(id, {
         messages: [...(conversation.messages ?? []), ...normalizedMessages],
       });
       metadata.updatedAt = timestamp;

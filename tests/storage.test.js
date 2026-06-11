@@ -35,6 +35,16 @@ class StaleIndexStore extends MemoryStore {
   }
 }
 
+class StaleConversationStore extends MemoryStore {
+  async get(key, options) {
+    this.getCalls.push({ key, options });
+    if (key.startsWith('conversation-')) {
+      return { messages: [] };
+    }
+    return this.data.get(key) ?? null;
+  }
+}
+
 describe('conversation storage', () => {
   let service;
 
@@ -79,6 +89,20 @@ describe('conversation storage', () => {
 
     expect(updated.messages).toHaveLength(1);
     expect(await localService.listConversations()).toHaveLength(1);
+  });
+
+  it('preserves earlier messages when blob conversation reads are stale within the same request', async () => {
+    const localService = createConversationService(new StaleConversationStore());
+
+    const conversation = await localService.createConversation({ title: 'New chat' });
+    await localService.appendMessages(conversation.id, [
+      { role: 'user', content: 'hello' },
+    ]);
+    const updated = await localService.appendMessages(conversation.id, [
+      { role: 'assistant', content: 'hi' },
+    ]);
+
+    expect(updated.messages.map((message) => message.content)).toEqual(['hello', 'hi']);
   });
 
   it('sorts pinned conversations before recently updated conversations', async () => {
