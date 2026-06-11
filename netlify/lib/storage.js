@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { getStore } from '@netlify/blobs';
+import { connectLambda, getStore } from '@netlify/blobs';
 
 const INDEX_KEY = 'conversation-index';
 
@@ -25,7 +25,13 @@ async function readJSON(store, key, fallback) {
   return value ?? fallback;
 }
 
-export function createConversationService(store = getStore('deepseek-gui')) {
+export function createConversationService(storeOrEvent = getStore('deepseek-gui')) {
+  const store = typeof storeOrEvent?.httpMethod === 'string'
+    ? (() => {
+        connectLambda(storeOrEvent);
+        return getStore('deepseek-gui');
+      })()
+    : storeOrEvent;
   async function readIndex() {
     const index = await readJSON(store, INDEX_KEY, { conversations: [] });
     return {

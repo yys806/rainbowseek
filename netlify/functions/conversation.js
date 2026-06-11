@@ -12,7 +12,7 @@ export async function handler(event) {
     return json(400, { error: 'Conversation id is required' });
   }
 
-  const service = createConversationService();
+  const service = createConversationService(event);
 
   try {
     if (event.httpMethod === 'GET') {

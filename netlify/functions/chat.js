@@ -23,7 +23,7 @@ export async function handler(event) {
       return json(400, { error: 'Message is required' });
     }
 
-    const service = createConversationService();
+    const service = createConversationService(event);
     const conversation = body.conversationId
       ? await service.getConversation(body.conversationId)
       : await service.createConversation({ title: titleFromMessage(body.message) });

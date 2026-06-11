@@ -7,7 +7,7 @@ export async function handler(event) {
     return response;
   }
 
-  const service = createConversationService();
+  const service = createConversationService(event);
 
   try {
     if (event.httpMethod === 'GET') {
