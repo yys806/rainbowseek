@@ -32,17 +32,29 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
         return getStore('deepseek-gui');
       })()
     : storeOrEvent;
+  let cachedIndex = null;
+
   async function readIndex() {
+    if (cachedIndex) {
+      return {
+        conversations: cachedIndex.conversations.map((item) => ({ ...item })),
+      };
+    }
+
     const index = await readJSON(store, INDEX_KEY, { conversations: [] });
-    return {
+    cachedIndex = {
       conversations: Array.isArray(index.conversations) ? index.conversations : [],
+    };
+    return {
+      conversations: cachedIndex.conversations.map((item) => ({ ...item })),
     };
   }
 
   async function writeIndex(index) {
-    await store.setJSON(INDEX_KEY, {
+    cachedIndex = {
       conversations: sortConversations(index.conversations),
-    });
+    };
+    await store.setJSON(INDEX_KEY, cachedIndex);
   }
 
   async function getMetadata(id) {
