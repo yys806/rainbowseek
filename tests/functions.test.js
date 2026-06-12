@@ -74,6 +74,9 @@ describe('chat prompt builder', () => {
     expect(apiMessages[0]).toMatchObject({ role: 'system' });
     expect(apiMessages[0].content).toContain('Answer only the latest user message');
     expect(apiMessages[0].content).toContain('previous conversation only to understand context');
+    expect(apiMessages[0].content).toContain('Your name is rainbowseek');
+    expect(apiMessages[0].content).not.toContain('Keep the final answer compact');
+    expect(apiMessages[0].content).not.toContain('Do not insert blank lines');
     expect(apiMessages[1].content).toBe('old question');
     expect(apiMessages[3].content).toContain('Current user message to answer');
     expect(apiMessages[3].content).toContain('current question');

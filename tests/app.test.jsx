@@ -489,6 +489,77 @@ describe('App shell', () => {
     expect(document.body.textContent).not.toContain('finished');
   });
 
+  it('keeps the completed answer visible when sync briefly returns an older conversation snapshot', async () => {
+    vi.useFakeTimers();
+    let conversationReads = 0;
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations: [{ ...conversations[0], id: 'new-chat', title: 'hello' }] });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        conversationReads += 1;
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            id: 'new-chat',
+            title: 'hello',
+            messages:
+              conversationReads <= 1
+                ? [
+                    { id: 'u1', role: 'user', content: 'hello', createdAt: '2026-06-12T04:22:00.000Z' },
+                    { id: 'a1', role: 'assistant', content: 'stable answer', createdAt: '2026-06-12T04:22:01.000Z' },
+                  ]
+                : [{ id: 'u1', role: 'user', content: 'hello', createdAt: '2026-06-12T04:22:00.000Z' }],
+          },
+        });
+      }
+      if (path === '/.netlify/functions/chat-stream') {
+        const body = JSON.parse(options.body);
+        return streamResponse([
+          { type: 'meta', conversationId: 'new-chat', title: 'hello', model: body.model },
+          { type: 'content', delta: 'stable answer' },
+          {
+            type: 'done',
+            conversation: {
+              ...conversations[0],
+              id: 'new-chat',
+              title: 'hello',
+              messages: [
+                { id: 'u1', role: 'user', content: body.message, createdAt: '2026-06-12T04:22:00.000Z' },
+                { id: 'a1', role: 'assistant', content: 'stable answer', createdAt: '2026-06-12T04:22:01.000Z' },
+              ],
+            },
+            conversations: [{ ...conversations[0], id: 'new-chat', title: 'hello' }],
+          },
+        ]);
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.querySelector('.composer textarea')).toBeTruthy();
+    });
+
+    const textarea = document.querySelector('.composer textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'hello');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('.send-button').click();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('stable answer');
+    });
+
+    await vi.advanceTimersByTimeAsync(3600);
+    await Promise.resolve();
+
+    expect(document.body.textContent).toContain('stable answer');
+    vi.useRealTimers();
+  });
+
   it('streams reasoning open, then folds it after the final answer and compacts blank lines', async () => {
     vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
       if (path === '/.netlify/functions/session') {

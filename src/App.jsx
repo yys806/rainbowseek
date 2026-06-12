@@ -149,6 +149,24 @@ function updateStreamingMessage(conversation, messageId, { contentDelta = '', re
   };
 }
 
+function isConversationSnapshotNewer(localConversation, remoteConversation) {
+  if (!localConversation || localConversation.id !== remoteConversation?.id) return true;
+  const localMessages = localConversation.messages ?? [];
+  const remoteMessages = remoteConversation.messages ?? [];
+  if (remoteMessages.length < localMessages.length) return false;
+  if (remoteMessages.length > localMessages.length) return true;
+  const remoteHasShorterMessage = localMessages.some((localMessage, index) => {
+    const remoteMessage = remoteMessages[index];
+    if (!remoteMessage || remoteMessage.role !== localMessage.role) return true;
+    return (
+      String(remoteMessage.content ?? '').length < String(localMessage.content ?? '').length ||
+      String(remoteMessage.reasoning ?? '').length < String(localMessage.reasoning ?? '').length
+    );
+  });
+  if (remoteHasShorterMessage) return false;
+  return new Date(remoteConversation.updatedAt ?? 0).getTime() >= new Date(localConversation.updatedAt ?? 0).getTime();
+}
+
 async function copyText(value) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -618,7 +636,9 @@ function ChatApp({ session, onLogout }) {
       if (activeIdRef.current !== id) {
         return;
       }
-      setActiveConversation(payload.conversation);
+      setActiveConversation((current) =>
+        isConversationSnapshotNewer(current, payload.conversation) ? payload.conversation : current,
+      );
     } catch (err) {
       if (err.status === 404 || err.message === 'Conversation not found') {
         if (activeIdRef.current !== id) {
