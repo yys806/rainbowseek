@@ -38,6 +38,12 @@ npm run build
 
 ## Netlify
 
+Production site: https://rainbowseek.netlify.app
+
+GitHub repository: https://github.com/yys806/rainbowseek
+
+The Netlify project is connected to the `main` branch. Pushes to GitHub trigger production builds automatically.
+
 Build command: `npm run build`
 
 Publish directory: `dist`
