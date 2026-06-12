@@ -97,6 +97,10 @@ function modelLabel(model) {
   return model === 'deepseek-v4-pro' ? 'V4 Pro' : 'V4 Flash';
 }
 
+function compactBlankLines(value) {
+  return String(value ?? '').replace(/\n{3,}/g, '\n\n');
+}
+
 function updateStreamingMessage(conversation, messageId, { contentDelta = '', reasoningDelta = '' }) {
   if (!conversation) return conversation;
   return {
@@ -105,8 +109,9 @@ function updateStreamingMessage(conversation, messageId, { contentDelta = '', re
       if (message.id !== messageId) return message;
       return {
         ...message,
-        content: `${message.content ?? ''}${contentDelta}`,
-        reasoning: reasoningDelta ? `${message.reasoning ?? ''}${reasoningDelta}` : message.reasoning,
+        content: compactBlankLines(`${message.content ?? ''}${contentDelta}`),
+        reasoning: reasoningDelta ? compactBlankLines(`${message.reasoning ?? ''}${reasoningDelta}`) : message.reasoning,
+        reasoningOpen: reasoningDelta ? true : message.reasoningOpen,
       };
     }),
   };
@@ -412,11 +417,11 @@ function MessageActions({ message, onCopy, onEdit }) {
   );
 }
 
-function ReasoningBlock({ reasoning }) {
+function ReasoningBlock({ open, reasoning }) {
   if (!reasoning) return null;
   return (
-    <details className="reasoning-block">
-      <summary>思路摘要</summary>
+    <details className="reasoning-block" open={open}>
+      <summary>{open ? '正在思考' : '思路摘要'}</summary>
       <MarkdownMessage content={reasoning} />
     </details>
   );
@@ -449,8 +454,8 @@ function MessageList({ messages, loading, onCopy, onEdit }) {
           <div className="message-content">
             <div className="message-bubble">
               {message.model && <div className="message-model">{modelLabel(message.model)}</div>}
-              <ReasoningBlock reasoning={message.reasoning} />
-              <MarkdownMessage content={message.content} />
+              <ReasoningBlock open={Boolean(message.reasoningOpen)} reasoning={message.reasoning} />
+              <MarkdownMessage content={compactBlankLines(message.content)} />
             </div>
             <MessageActions message={message} onCopy={onCopy} onEdit={onEdit} />
           </div>
@@ -624,6 +629,7 @@ function ChatApp({ session, onLogout }) {
       role: 'assistant',
       content: '',
       reasoning: null,
+      reasoningOpen: false,
       model,
       createdAt: new Date().toISOString(),
     };
@@ -653,7 +659,18 @@ function ChatApp({ session, onLogout }) {
             setActiveConversation((current) => updateStreamingMessage(current, assistantId, { reasoningDelta: delta }));
           },
           done: (payload) => {
-            finalPayload = payload;
+            finalPayload = {
+              ...payload,
+              conversation: {
+                ...payload.conversation,
+                messages: payload.conversation.messages.map((item) => ({
+                  ...item,
+                  content: compactBlankLines(item.content),
+                  reasoning: item.reasoning ? compactBlankLines(item.reasoning) : item.reasoning,
+                  reasoningOpen: false,
+                })),
+              },
+            };
             streamingConversationIdRef.current = null;
           },
           error: ({ error }) => {

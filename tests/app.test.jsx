@@ -263,6 +263,64 @@ describe('App shell', () => {
     });
   });
 
+  it('streams reasoning open, then folds it after the final answer and compacts blank lines', async () => {
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (path === '/.netlify/functions/conversations') {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({ conversation: { ...conversations[0], messages: [] } });
+      }
+      if (path === '/.netlify/functions/chat-stream') {
+        const body = JSON.parse(options.body);
+        return streamResponse([
+          { type: 'meta', conversationId: 'old-chat', title: 'Reply in markdown ...', model: body.model },
+          { type: 'reasoning', delta: 'thinking' },
+          { type: 'content', delta: 'first\n\n\n\nsecond' },
+          {
+            type: 'done',
+            conversation: {
+              ...conversations[0],
+              messages: [
+                { id: 'u2', role: 'user', content: body.message, createdAt: '2026-06-12T04:22:00.000Z' },
+                {
+                  id: 'a2',
+                  role: 'assistant',
+                  content: 'first\n\nsecond',
+                  reasoning: 'thinking',
+                  model: body.model,
+                  createdAt: '2026-06-12T04:22:01.000Z',
+                },
+              ],
+            },
+            conversations,
+          },
+        ]);
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+
+    const textarea = document.querySelector('.composer textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'explain');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('.send-button').click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.reasoning-block')?.open).toBe(false);
+      expect(document.body.textContent).toContain('first');
+      expect(document.body.textContent).toContain('second');
+      expect(document.body.textContent).not.toContain('\n\n\n');
+    });
+  });
+
   it('renders markdown code blocks with a dedicated copy button', async () => {
     const writeText = vi.fn();
     Object.defineProperty(navigator, 'clipboard', {
