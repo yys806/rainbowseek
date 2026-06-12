@@ -7,7 +7,7 @@ function titleFromMessage(message) {
   return normalized.length > 18 ? `${normalized.slice(0, 18)}...` : normalized || '新的聊天';
 }
 
-export async function handler(event) {
+export async function handler(event, context = {}) {
   if (event.httpMethod !== 'POST') {
     return methodNotAllowed();
   }
@@ -38,7 +38,7 @@ export async function handler(event) {
       })),
     ];
 
-    const assistant = await callDeepSeek(apiMessages, process.env, { userId: session.username });
+    const assistant = await callDeepSeek(apiMessages, context.env ?? process.env, { userId: session.username });
     const updated = await service.appendMessages(conversation.id, [assistant]);
 
     return json(200, {
