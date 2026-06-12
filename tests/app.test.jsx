@@ -869,6 +869,18 @@ describe('App shell', () => {
       if (String(path).startsWith('/.netlify/functions/conversations')) {
         return jsonResponse({ conversations: [] });
       }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            id: 'image-chat',
+            title: 'image chat',
+            pinned: false,
+            createdAt: '2026-06-12T04:22:00.000Z',
+            updatedAt: '2026-06-12T04:22:00.000Z',
+            messages: [],
+          },
+        });
+      }
       if (path === '/.netlify/functions/chat-stream') {
         chatBodies.push(JSON.parse(options.body));
         return streamResponse([
@@ -942,6 +954,111 @@ describe('App shell', () => {
       });
       expect(chatBodies[0].images).toEqual([{ dataUrl: readerResult, name: 'photo.png' }]);
     });
+    globalThis.FileReader = originalFileReader;
+    globalThis.Image = originalImage;
+    root.unmount();
+  });
+
+  it('shows an image recognition status while waiting for a pictured chat response', async () => {
+    let streamController;
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations: [] });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            id: 'image-chat',
+            title: 'image chat',
+            pinned: false,
+            createdAt: '2026-06-12T04:22:00.000Z',
+            updatedAt: '2026-06-12T04:22:00.000Z',
+            messages: [],
+          },
+        });
+      }
+      if (path === '/.netlify/functions/chat-stream') {
+        const encoder = new TextEncoder();
+        return {
+          ok: true,
+          body: new ReadableStream({
+            start(controller) {
+              streamController = { controller, encoder };
+            },
+          }),
+        };
+      }
+      return jsonResponse({});
+    });
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('rainbowseek');
+    });
+
+    const originalFileReader = globalThis.FileReader;
+    const originalImage = globalThis.Image;
+    class MockFileReader {
+      readAsDataURL() {
+        this.result = 'data:image/png;base64,aW1hZ2U=';
+        this.onload?.();
+      }
+    }
+    class MockImage {
+      set src(_value) {
+        this.onerror?.();
+      }
+    }
+    globalThis.FileReader = MockFileReader;
+    globalThis.Image = MockImage;
+
+    const file = new File(['image'], 'photo.png', { type: 'image/png' });
+    const fileInput = document.querySelector('input[type="file"]');
+    Object.defineProperty(fileInput, 'files', { configurable: true, value: [file] });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.querySelector('.image-preview img')).toBeTruthy();
+    });
+    document.querySelector('.send-button').click();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('图片识别中');
+      expect(streamController).toBeTruthy();
+    });
+
+    streamController.controller.enqueue(streamController.encoder.encode(`${JSON.stringify({
+      type: 'meta',
+      conversationId: 'image-chat',
+      title: 'image chat',
+      model: 'deepseek-v4-flash',
+    })}\n`));
+    streamController.controller.enqueue(streamController.encoder.encode(`${JSON.stringify({ type: 'content', delta: 'ok' })}\n`));
+    streamController.controller.enqueue(streamController.encoder.encode(`${JSON.stringify({
+      type: 'done',
+      conversation: {
+        id: 'image-chat',
+        title: 'image chat',
+        pinned: false,
+        createdAt: '2026-06-12T04:22:00.000Z',
+        updatedAt: '2026-06-12T04:22:00.000Z',
+        messages: [
+          { id: 'u1', role: 'user', content: '请识别并回答图片内容。', createdAt: '2026-06-12T04:22:00.000Z' },
+          { id: 'a1', role: 'assistant', content: 'ok', createdAt: '2026-06-12T04:22:01.000Z' },
+        ],
+      },
+      conversations: [],
+    })}\n`));
+    streamController.controller.close();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('ok');
+      expect(document.body.textContent).not.toContain('图片识别中');
+    });
+
     globalThis.FileReader = originalFileReader;
     globalThis.Image = originalImage;
     root.unmount();

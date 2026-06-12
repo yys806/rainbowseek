@@ -169,6 +169,7 @@ function updateStreamingMessage(conversation, messageId, { contentDelta = '', re
         content: `${message.content ?? ''}${contentDelta}`,
         reasoning: reasoningDelta ? `${message.reasoning ?? ''}${reasoningDelta}` : message.reasoning,
         reasoningOpen: reasoningDelta ? true : message.reasoningOpen,
+        visualStatus: contentDelta || reasoningDelta ? null : message.visualStatus,
       };
     }),
   };
@@ -544,6 +545,16 @@ function ReasoningBlock({ open, reasoning }) {
   );
 }
 
+function VisualStatus({ status }) {
+  if (!status) return null;
+  return (
+    <div className="visual-status" role="status">
+      <span />
+      {status}
+    </div>
+  );
+}
+
 function MessageList({ messages, loading, onCopy, onEdit, forceScrollSignal = 0 }) {
   const messagesRef = useRef(null);
   const bottomRef = useRef(null);
@@ -583,6 +594,7 @@ function MessageList({ messages, loading, onCopy, onEdit, forceScrollSignal = 0 
           <div className="message-content">
             <div className="message-bubble">
               {message.model && <div className="message-model">{modelLabel(message.model)}</div>}
+              <VisualStatus status={message.visualStatus} />
               <ReasoningBlock open={Boolean(message.reasoningOpen)} reasoning={message.reasoning} />
               <MarkdownMessage content={normalizeDisplayText(message.content)} />
             </div>
@@ -923,6 +935,7 @@ function ChatApp({ session, onLogout }) {
       content: '',
       reasoning: null,
       reasoningOpen: false,
+      visualStatus: imagesForRequest.length > 0 ? '图片识别中' : null,
       model,
       createdAt: new Date().toISOString(),
     };
@@ -963,6 +976,7 @@ function ChatApp({ session, onLogout }) {
                 messages: payload.conversation.messages.map((item) => ({
                   ...item,
                   reasoningOpen: false,
+                  visualStatus: null,
                 })),
               },
             };

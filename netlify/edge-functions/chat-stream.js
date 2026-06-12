@@ -126,42 +126,6 @@ async function describeImages(images, question) {
   return cleanAssistantText(content);
 }
 
-async function planSearch(message, apiKey) {
-  const response = await fetch(DEEPSEEK_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: 'deepseek-v4-flash',
-      messages: [
-        {
-          role: 'system',
-          content: 'Decide whether answering the user needs fresh web search. Return only JSON: {"search":true|false,"query":"..."}',
-        },
-        { role: 'user', content: message },
-      ],
-      stream: false,
-      max_tokens: 120,
-      user: 'rainbow',
-    }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || `DeepSeek search planner failed with ${response.status}`);
-  }
-  try {
-    const parsed = JSON.parse(String(payload?.choices?.[0]?.message?.content ?? '').replace(/```json|```/g, '').trim());
-    return {
-      search: Boolean(parsed.search),
-      query: typeof parsed.query === 'string' ? parsed.query.trim() : '',
-    };
-  } catch {
-    return { search: false, query: '' };
-  }
-}
-
 async function searchWeb(query) {
   const apiKey = Netlify.env.get('TAVILY_API_KEY');
   if (!apiKey) {
@@ -198,11 +162,9 @@ async function searchWeb(query) {
   };
 }
 
-async function maybeSearchWeb(message, enabled, deepseekApiKey) {
+async function maybeSearchWeb(message, enabled) {
   if (!enabled) return null;
-  const plan = await planSearch(message, deepseekApiKey);
-  if (!plan.search || !plan.query) return null;
-  return searchWeb(plan.query);
+  return searchWeb(message);
 }
 
 export default async function handler(request, context) {
@@ -229,7 +191,7 @@ export default async function handler(request, context) {
   let webSearch = null;
   try {
     imageDescription = await describeImages(body.images, body.message);
-    webSearch = await maybeSearchWeb(body.message, Boolean(body.webSearchEnabled), apiKey);
+    webSearch = await maybeSearchWeb(body.message, Boolean(body.webSearchEnabled));
   } catch (error) {
     return json(502, { error: error.message || 'Failed to prepare visual/search context' });
   }

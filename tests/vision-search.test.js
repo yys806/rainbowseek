@@ -66,18 +66,10 @@ describe('web search bridge', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('lets DeepSeek decide whether to call Tavily and returns search results', async () => {
+  it('calls Tavily directly when web search is enabled', async () => {
     const requests = [];
     vi.stubGlobal('fetch', vi.fn(async (url, options) => {
       requests.push({ url: String(url), body: JSON.parse(options.body), headers: options.headers });
-      if (String(url).includes('deepseek')) {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: '{"search":true,"query":"rainbowseek latest"}' } }],
-          }),
-        };
-      }
       return {
         ok: true,
         json: async () => ({
@@ -88,14 +80,13 @@ describe('web search bridge', () => {
     }));
 
     const result = await maybeSearchWeb('查一下最新消息', true, {
-      DEEPSEEK_API_KEY: 'deepseek-test-key',
       TAVILY_API_KEY: 'tavily-test-key',
     });
 
-    expect(requests).toHaveLength(2);
-    expect(requests[0].body.messages[0].content).toContain('Decide whether');
-    expect(requests[1].url).toBe('https://api.tavily.com/search');
-    expect(requests[1].headers.Authorization).toBe('Bearer tavily-test-key');
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe('https://api.tavily.com/search');
+    expect(requests[0].body.query).toBeTruthy();
+    expect(requests[0].headers.Authorization).toBe('Bearer tavily-test-key');
     expect(result.results[0].url).toBe('https://example.com');
   });
 });
