@@ -1,8 +1,8 @@
 import { createConversationService } from '../lib/storage.js';
 import { handleError, json, methodNotAllowed, parseBody, requireAuth } from '../lib/http.js';
 
-export async function handler(event) {
-  const { response } = requireAuth(event);
+export async function handler(event, context = {}) {
+  const { response } = requireAuth(event, context.env ?? process.env);
   if (response) {
     return response;
   }

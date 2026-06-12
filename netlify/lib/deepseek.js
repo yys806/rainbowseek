@@ -1,16 +1,19 @@
+import { getEnvValue } from './auth.js';
+
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 
 export async function callDeepSeek(messages, env = process.env, options = {}) {
-  if (!env.DEEPSEEK_API_KEY) {
+  const apiKey = getEnvValue(env, 'DEEPSEEK_API_KEY');
+  if (!apiKey) {
     throw new Error('DEEPSEEK_API_KEY is not configured');
   }
 
-  const model = env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
+  const model = getEnvValue(env, 'DEEPSEEK_MODEL') || 'deepseek-v4-flash';
   const response = await fetch(DEEPSEEK_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model,

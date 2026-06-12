@@ -3,8 +3,15 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 const COOKIE_NAME = 'deepseek_session';
 const DEFAULT_MAX_AGE_SECONDS = 60 * 60 * 24 * 14;
 
+export function getEnvValue(env, key) {
+  if (env && typeof env.get === 'function') {
+    return env.get(key) ?? process.env[key];
+  }
+  return env?.[key] ?? process.env[key];
+}
+
 function getSecret(env) {
-  const secret = env.SESSION_SECRET;
+  const secret = getEnvValue(env, 'SESSION_SECRET');
   if (!secret || secret.length < 16) {
     throw new Error('SESSION_SECRET must be at least 16 characters');
   }
@@ -31,7 +38,7 @@ function extractCookie(cookieHeader) {
 }
 
 export function validateCredentials(username, password, env = process.env) {
-  return username === env.APP_USERNAME && password === env.APP_PASSWORD;
+  return username === getEnvValue(env, 'APP_USERNAME') && password === getEnvValue(env, 'APP_PASSWORD');
 }
 
 export function createSessionCookie(username, env = process.env, options = {}) {

@@ -12,7 +12,8 @@ export async function handler(event, context = {}) {
     return methodNotAllowed();
   }
 
-  const { response, session } = requireAuth(event);
+  const env = context.env ?? process.env;
+  const { response, session } = requireAuth(event, env);
   if (response) {
     return response;
   }
@@ -38,7 +39,7 @@ export async function handler(event, context = {}) {
       })),
     ];
 
-    const assistant = await callDeepSeek(apiMessages, context.env ?? process.env, { userId: session.username });
+    const assistant = await callDeepSeek(apiMessages, env, { userId: session.username });
     const updated = await service.appendMessages(conversation.id, [assistant]);
 
     return json(200, {

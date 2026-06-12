@@ -24,4 +24,31 @@ describe('login function', () => {
 
     expect(response.statusCode).toBe(200);
   });
+
+  it('supports Netlify context.env.get style values', async () => {
+    vi.stubEnv('APP_USERNAME', '');
+    vi.stubEnv('APP_PASSWORD', '');
+    vi.stubEnv('SESSION_SECRET', '');
+    const { handler } = await import('../netlify/functions/login.js');
+    const values = new Map([
+      ['APP_USERNAME', 'rainbow'],
+      ['APP_PASSWORD', '050428'],
+      ['SESSION_SECRET', 'test-secret-with-enough-length'],
+    ]);
+
+    const response = await handler(
+      {
+        httpMethod: 'POST',
+        headers: { 'x-forwarded-proto': 'https' },
+        body: JSON.stringify({ username: 'rainbow', password: '050428' }),
+      },
+      {
+        env: {
+          get: (key) => values.get(key),
+        },
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+  });
 });

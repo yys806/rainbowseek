@@ -39,8 +39,8 @@ export function parseBody(event) {
   }
 }
 
-export function requireAuth(event) {
-  const session = requireSession(event);
+export function requireAuth(event, env = process.env) {
+  const session = requireSession(event, env);
   if (!session) {
     return { response: unauthorized(), session: null };
   }
