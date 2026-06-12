@@ -105,6 +105,24 @@ describe('conversation storage', () => {
     expect(updated.messages.map((message) => message.content)).toEqual(['hello', 'hi']);
   });
 
+  it('can append with metadata when another function cannot immediately read the index', async () => {
+    const localService = createConversationService(new MemoryStore());
+    const updated = await localService.appendMessagesWithMetadata(
+      {
+        id: 'edge-chat',
+        title: 'Edge chat',
+        pinned: false,
+        createdAt: '2026-06-12T08:59:00.000Z',
+        updatedAt: '2026-06-12T08:59:00.000Z',
+      },
+      [{ role: 'assistant', content: 'streamed' }],
+    );
+
+    expect(updated.title).toBe('Edge chat');
+    expect(updated.messages[0].content).toBe('streamed');
+    expect((await localService.listConversations())[0].id).toBe('edge-chat');
+  });
+
   it('sorts pinned conversations before recently updated conversations', async () => {
     const first = await service.createConversation({ title: 'A' });
     vi.setSystemTime(new Date('2026-06-12T09:01:00.000Z'));

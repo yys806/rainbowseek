@@ -35,6 +35,9 @@ export async function handler(event, context = {}) {
       conversation: {
         id: latest.id,
         title: latest.title,
+        pinned: latest.pinned,
+        createdAt: latest.createdAt,
+        updatedAt: latest.updatedAt,
       },
       apiMessages: [
         { role: 'system', content: 'You are a warm, clear, and helpful assistant. Answer in the user language.' },

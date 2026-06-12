@@ -148,6 +148,42 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
       return this.getConversation(id);
     },
 
+    async appendMessagesWithMetadata(metadata, messages) {
+      const index = await readIndex();
+      let existing = index.conversations.find((item) => item.id === metadata.id);
+      if (!existing) {
+        existing = {
+          id: metadata.id,
+          title: metadata.title || '新的聊天',
+          pinned: Boolean(metadata.pinned),
+          createdAt: metadata.createdAt ?? nowIso(),
+          updatedAt: metadata.updatedAt ?? nowIso(),
+        };
+        index.conversations.push(existing);
+      }
+
+      const conversation = await readConversationBody(metadata.id);
+      const timestamp = nowIso();
+      const normalizedMessages = messages.map((message) => ({
+        id: message.id ?? randomUUID(),
+        role: message.role,
+        content: message.content,
+        model: message.model ?? null,
+        reasoning: message.reasoning ?? null,
+        createdAt: message.createdAt ?? timestamp,
+      }));
+
+      await writeConversationBody(metadata.id, {
+        messages: [...(conversation.messages ?? []), ...normalizedMessages],
+      });
+      existing.title = existing.title || metadata.title || '新的聊天';
+      existing.pinned = Boolean(existing.pinned);
+      existing.createdAt = existing.createdAt ?? metadata.createdAt ?? timestamp;
+      existing.updatedAt = timestamp;
+      await writeIndex(index);
+      return this.getConversation(metadata.id);
+    },
+
     async renameConversation(id, title) {
       const index = await readIndex();
       const metadata = index.conversations.find((item) => item.id === id);

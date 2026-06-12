@@ -29,7 +29,9 @@ export async function handler(event, context = {}) {
       model: body.model,
       usage: null,
     };
-    const updated = await service.appendMessages(body.conversationId, [assistant]);
+    const updated = body.conversation
+      ? await service.appendMessagesWithMetadata(body.conversation, [assistant])
+      : await service.appendMessages(body.conversationId, [assistant]);
 
     return json(200, {
       conversation: updated,

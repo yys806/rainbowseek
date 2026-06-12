@@ -124,6 +124,7 @@ export default async function handler(request, context) {
           },
           body: JSON.stringify({
             conversationId: prepared.conversation.id,
+            conversation: prepared.conversation,
             content,
             reasoning,
             model,
