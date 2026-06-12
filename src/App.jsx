@@ -31,7 +31,9 @@ async function api(path, options = {}) {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error || '请求失败');
+    const error = new Error(payload.error || '请求失败');
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -174,6 +176,50 @@ function ConversationActions({ conversation, onRename, onPin, onDelete }) {
   );
 }
 
+function Dialog({ dialog, onCancel, onConfirm, onRenameValueChange }) {
+  if (!dialog) return null;
+
+  const isRename = dialog.type === 'rename';
+  const title = isRename ? '重命名聊天' : '删除这段聊天？';
+  const description = isRename
+    ? '给这段聊天换一个好认的名字。'
+    : `删除「${dialog.conversation.title}」后，这段记录会从所有设备移除。`;
+
+  function submit(event) {
+    event.preventDefault();
+    onConfirm();
+  }
+
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <form aria-modal="true" className="dialog-panel" onSubmit={submit} role="dialog">
+        <div className="dialog-mark">
+          {isRename ? <Pencil size={20} /> : <Trash2 size={20} />}
+        </div>
+        <h2>{title}</h2>
+        <p>{description}</p>
+        {isRename && (
+          <input
+            autoFocus
+            className="dialog-input"
+            maxLength={80}
+            onChange={(event) => onRenameValueChange(event.target.value)}
+            value={dialog.value}
+          />
+        )}
+        <div className="dialog-actions">
+          <button className="dialog-secondary" onClick={onCancel} type="button">
+            取消
+          </button>
+          <button className={isRename ? 'dialog-primary' : 'dialog-danger'} type="submit">
+            {isRename ? '保存' : '删除'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function Sidebar({
   activeId,
   conversations,
@@ -212,24 +258,24 @@ function Sidebar({
           </div>
         )}
         {conversations.map((conversation) => (
-          <button
+          <div
             className={`conversation-row ${conversation.id === activeId ? 'active' : ''}`}
             key={conversation.id}
-            onClick={() => onSelect(conversation.id)}
-            type="button"
           >
-            <span className="conversation-title">
-              {conversation.pinned && <Pin size={13} />}
-              {conversation.title}
-            </span>
-            <span className="conversation-time">{formatTime(conversation.updatedAt)}</span>
+            <button className="conversation-main" onClick={() => onSelect(conversation.id)} type="button">
+              <span className="conversation-title">
+                {conversation.pinned && <Pin size={13} />}
+                {conversation.title}
+              </span>
+              <span className="conversation-time">{formatTime(conversation.updatedAt)}</span>
+            </button>
             <ConversationActions
               conversation={conversation}
               onDelete={onDelete}
               onPin={onPin}
               onRename={onRename}
             />
-          </button>
+          </div>
         ))}
       </nav>
       <button className="logout-button" onClick={onLogout} type="button">
@@ -323,16 +369,35 @@ function ChatApp({ session, onLogout }) {
   const [activeConversation, setActiveConversation] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [dialog, setDialog] = useState(null);
 
   const activeMessages = activeConversation?.messages ?? [];
   const activeTitle = useMemo(() => activeConversation?.title || '新的聊天', [activeConversation]);
 
-  async function refreshConversations(nextActiveId = activeId) {
+  async function refreshConversations(nextActiveId = activeId, options = {}) {
     const payload = await api('/.netlify/functions/conversations');
-    setConversations(payload.conversations);
-    if (!nextActiveId && payload.conversations[0]) {
-      setActiveId(payload.conversations[0].id);
+    const nextConversations = payload.conversations;
+    setConversations(nextConversations);
+    if (options.keepNewChat) {
+      return nextConversations;
     }
+    if (nextActiveId && nextConversations.some((conversation) => conversation.id === nextActiveId)) {
+      return nextConversations;
+    }
+    if (nextConversations[0]) {
+      setActiveId(nextConversations[0].id);
+    } else {
+      setActiveId(null);
+      setActiveConversation(null);
+    }
+    return nextConversations;
+  }
+
+  async function recoverMissingConversation() {
+    setActiveId(null);
+    setActiveConversation(null);
+    setError('这段聊天已经不存在，已为你切回新的聊天。');
+    await refreshConversations(null, { keepNewChat: true });
   }
 
   async function loadConversation(id) {
@@ -340,8 +405,16 @@ function ChatApp({ session, onLogout }) {
       setActiveConversation(null);
       return;
     }
-    const payload = await api(`/.netlify/functions/conversation?id=${encodeURIComponent(id)}`);
-    setActiveConversation(payload.conversation);
+    try {
+      const payload = await api(`/.netlify/functions/conversation?id=${encodeURIComponent(id)}`);
+      setActiveConversation(payload.conversation);
+    } catch (err) {
+      if (err.status === 404 || err.message === 'Conversation not found') {
+        await recoverMissingConversation();
+        return;
+      }
+      throw err;
+    }
   }
 
   useEffect(() => {
@@ -367,55 +440,96 @@ function ChatApp({ session, onLogout }) {
       content: message,
       createdAt: new Date().toISOString(),
     };
+    const targetId = activeConversation?.id === activeId ? activeId : null;
     setActiveConversation((current) => ({
-      ...(current ?? { id: activeId, title: '新的聊天', messages: [] }),
+      ...(current ?? { id: targetId, title: '新的聊天', messages: [] }),
       messages: [...(current?.messages ?? []), optimistic],
     }));
 
     try {
       const payload = await api('/.netlify/functions/chat', {
         method: 'POST',
-        body: JSON.stringify({ conversationId: activeId, message }),
+        body: JSON.stringify({ conversationId: targetId, message }),
       });
       setConversations(payload.conversations);
       setActiveId(payload.conversation.id);
       setActiveConversation(payload.conversation);
     } catch (err) {
-      setError(err.message);
+      if (err.status === 404 || err.message === 'Conversation not found') {
+        await recoverMissingConversation();
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  async function renameConversation(conversation) {
-    const title = window.prompt('新的聊天名称', conversation.title);
-    if (!title || title.trim() === conversation.title) return;
-    const payload = await api(`/.netlify/functions/conversation?id=${encodeURIComponent(conversation.id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ title }),
-    });
-    setActiveConversation((current) => (current?.id === conversation.id ? payload.conversation : current));
-    await refreshConversations(conversation.id);
+  async function confirmRename() {
+    if (!dialog || dialog.type !== 'rename') return;
+    const { conversation } = dialog;
+    const title = dialog.value.trim();
+    if (!title || title === conversation.title) {
+      setDialog(null);
+      return;
+    }
+    try {
+      const payload = await api(`/.netlify/functions/conversation?id=${encodeURIComponent(conversation.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+      });
+      setActiveConversation((current) => (current?.id === conversation.id ? payload.conversation : current));
+      setDialog(null);
+      await refreshConversations(conversation.id);
+    } catch (err) {
+      if (err.status === 404 || err.message === 'Conversation not found') {
+        setDialog(null);
+        await recoverMissingConversation();
+      } else {
+        setError(err.message);
+      }
+    }
   }
 
   async function togglePin(conversation) {
-    const payload = await api(`/.netlify/functions/conversation?id=${encodeURIComponent(conversation.id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ pinned: !conversation.pinned }),
-    });
-    setActiveConversation((current) => (current?.id === conversation.id ? payload.conversation : current));
-    await refreshConversations(conversation.id);
+    try {
+      const payload = await api(`/.netlify/functions/conversation?id=${encodeURIComponent(conversation.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ pinned: !conversation.pinned }),
+      });
+      setActiveConversation((current) => (current?.id === conversation.id ? payload.conversation : current));
+      await refreshConversations(conversation.id);
+    } catch (err) {
+      if (err.status === 404 || err.message === 'Conversation not found') {
+        await recoverMissingConversation();
+      } else {
+        setError(err.message);
+      }
+    }
   }
 
-  async function deleteConversation(conversation) {
-    if (!window.confirm(`删除「${conversation.title}」？`)) return;
-    await api(`/.netlify/functions/conversation?id=${encodeURIComponent(conversation.id)}`, {
-      method: 'DELETE',
-    });
-    setConversations((items) => items.filter((item) => item.id !== conversation.id));
-    if (activeId === conversation.id) {
-      setActiveId(null);
-      setActiveConversation(null);
+  async function confirmDelete() {
+    if (!dialog || dialog.type !== 'delete') return;
+    const { conversation } = dialog;
+    try {
+      await api(`/.netlify/functions/conversation?id=${encodeURIComponent(conversation.id)}`, {
+        method: 'DELETE',
+      });
+      const nextConversations = conversations.filter((item) => item.id !== conversation.id);
+      setDialog(null);
+      setConversations(nextConversations);
+      if (activeId === conversation.id) {
+        const nextActive = nextConversations[0] ?? null;
+        setActiveId(nextActive?.id ?? null);
+        setActiveConversation(null);
+      }
+    } catch (err) {
+      setDialog(null);
+      if (err.status === 404 || err.message === 'Conversation not found') {
+        await recoverMissingConversation();
+      } else {
+        setError(err.message);
+      }
     }
   }
 
@@ -432,10 +546,10 @@ function ChatApp({ session, onLogout }) {
         mobileOpen={mobileOpen}
         onCloseMobile={() => setMobileOpen(false)}
         onCreate={createConversation}
-        onDelete={deleteConversation}
+        onDelete={(conversation) => setDialog({ type: 'delete', conversation })}
         onLogout={logout}
         onPin={togglePin}
-        onRename={renameConversation}
+        onRename={(conversation) => setDialog({ type: 'rename', conversation, value: conversation.title })}
         onSelect={(id) => {
           setActiveId(id);
           setMobileOpen(false);
@@ -476,6 +590,12 @@ function ChatApp({ session, onLogout }) {
           <p>支持 Markdown 渲染。内容由 DeepSeek 生成，请重要信息自行核对。</p>
         </div>
       </section>
+      <Dialog
+        dialog={dialog}
+        onCancel={() => setDialog(null)}
+        onConfirm={dialog?.type === 'rename' ? confirmRename : confirmDelete}
+        onRenameValueChange={(value) => setDialog((current) => ({ ...current, value }))}
+      />
     </main>
   );
 }
