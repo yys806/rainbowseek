@@ -800,6 +800,55 @@ describe('App shell', () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
+  it('scrolls to the bottom when the composer receives focus', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: Array.from({ length: 20 }, (_, index) => ({
+              id: `a${index}`,
+              role: 'assistant',
+              content: `answer ${index}`,
+              createdAt: '2026-06-12T04:20:00.000Z',
+            })),
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('answer 19');
+    });
+
+    const messages = document.querySelector('.messages');
+    Object.defineProperty(messages, 'scrollHeight', { configurable: true, value: 2000 });
+    Object.defineProperty(messages, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(messages, 'scrollTop', { configurable: true, value: 200, writable: true });
+    messages.dispatchEvent(new Event('scroll', { bubbles: true }));
+    scrollIntoView.mockClear();
+
+    document.querySelector('.composer textarea').click();
+
+    await vi.waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalled();
+    });
+  });
+
   it('renders LaTeX formulas inside markdown messages', async () => {
     vi.mocked(fetch).mockImplementation(async (path) => {
       if (path === '/.netlify/functions/session') {

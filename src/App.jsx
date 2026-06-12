@@ -506,7 +506,7 @@ function ReasoningBlock({ open, reasoning }) {
   );
 }
 
-function MessageList({ messages, loading, onCopy, onEdit }) {
+function MessageList({ messages, loading, onCopy, onEdit, forceScrollSignal = 0 }) {
   const messagesRef = useRef(null);
   const bottomRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
@@ -519,10 +519,11 @@ function MessageList({ messages, loading, onCopy, onEdit }) {
   }
 
   useEffect(() => {
-    if (shouldStickToBottomRef.current) {
+    if (shouldStickToBottomRef.current || forceScrollSignal > 0) {
       bottomRef.current?.scrollIntoView?.({ behavior: 'smooth' });
+      shouldStickToBottomRef.current = true;
     }
-  }, [messages, loading]);
+  }, [messages, loading, forceScrollSignal]);
 
   if (messages.length === 0) {
     return (
@@ -562,7 +563,7 @@ function MessageList({ messages, loading, onCopy, onEdit }) {
   );
 }
 
-function Composer({ disabled, model, onModelChange, onSend, value, onChange }) {
+function Composer({ disabled, model, onModelChange, onSend, value, onChange, onFocus }) {
   function submit(event) {
     event.preventDefault();
     const message = value.trim();
@@ -589,6 +590,8 @@ function Composer({ disabled, model, onModelChange, onSend, value, onChange }) {
         <textarea
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
+          onClick={onFocus}
+          onFocus={onFocus}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
@@ -617,6 +620,7 @@ function ChatApp({ session, onLogout }) {
   const [error, setError] = useState('');
   const [dialog, setDialog] = useState(null);
   const [composerValue, setComposerValue] = useState('');
+  const [composerFocusScrollSignal, setComposerFocusScrollSignal] = useState(0);
   const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash');
   const [notice, setNotice] = useState('');
   const streamingConversationIdRef = useRef(null);
@@ -1013,12 +1017,19 @@ function ChatApp({ session, onLogout }) {
           </div>
         )}
         {notice && <div className="toast notice" role="status">{notice}</div>}
-        <MessageList loading={loading} messages={activeMessages} onCopy={copyMessage} onEdit={editMessage} />
+        <MessageList
+          forceScrollSignal={composerFocusScrollSignal}
+          loading={loading}
+          messages={activeMessages}
+          onCopy={copyMessage}
+          onEdit={editMessage}
+        />
         <div className="composer-wrap">
           <Composer
             disabled={loading}
             model={selectedModel}
             onChange={setComposerValue}
+            onFocus={() => setComposerFocusScrollSignal((value) => value + 1)}
             onModelChange={setSelectedModel}
             onSend={sendMessage}
             value={composerValue}
