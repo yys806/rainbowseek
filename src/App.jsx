@@ -129,7 +129,7 @@ function normalizeDisplayText(value) {
     .replace(/\r\n/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n[ \t]+/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n{2,}/g, '\n')
     .trim();
 }
 
@@ -485,10 +485,21 @@ function ReasoningBlock({ open, reasoning }) {
 }
 
 function MessageList({ messages, loading, onCopy, onEdit }) {
+  const messagesRef = useRef(null);
   const bottomRef = useRef(null);
+  const shouldStickToBottomRef = useRef(true);
+
+  function updateStickToBottom() {
+    const element = messagesRef.current;
+    if (!element) return;
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 80;
+  }
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView?.({ behavior: 'smooth' });
+    if (shouldStickToBottomRef.current) {
+      bottomRef.current?.scrollIntoView?.({ behavior: 'smooth' });
+    }
   }, [messages, loading]);
 
   if (messages.length === 0) {
@@ -504,7 +515,7 @@ function MessageList({ messages, loading, onCopy, onEdit }) {
   }
 
   return (
-    <div className="messages">
+    <div className="messages" onScroll={updateStickToBottom} ref={messagesRef}>
       {messages.map((message) => (
         <article className={`message ${message.role}`} key={message.id ?? `${message.role}-${message.createdAt}`}>
           <MessageAvatar role={message.role} />

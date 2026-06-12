@@ -19,6 +19,15 @@ function streamEvent(type, payload = {}) {
   return `${JSON.stringify({ type, ...payload })}\n`;
 }
 
+function cleanAssistantText(value) {
+  return String(value ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
+
 function parseDeepSeekStreamChunk(text) {
   const events = [];
   for (const line of text.split('\n')) {
@@ -107,6 +116,8 @@ export default async function handler(request, context) {
   const decoder = new TextDecoder();
   let content = '';
   let reasoning = '';
+  let sentContent = '';
+  let sentReasoning = '';
   let buffer = '';
 
   const readable = new ReadableStream({
@@ -125,8 +136,8 @@ export default async function handler(request, context) {
           body: JSON.stringify({
             conversationId: prepared.conversation.id,
             conversation: prepared.conversation,
-            content: content.trim(),
-            reasoning: reasoning.trim(),
+            content: cleanAssistantText(content),
+            reasoning: cleanAssistantText(reasoning),
             model,
           }),
         }).then(async (response) => {
@@ -158,11 +169,17 @@ export default async function handler(request, context) {
             const contentDelta = delta.content ?? '';
             if (reasoningDelta) {
               reasoning += reasoningDelta;
-              send('reasoning', { delta: reasoningDelta });
+              const cleanedReasoning = cleanAssistantText(reasoning);
+              const nextDelta = cleanedReasoning.slice(sentReasoning.length);
+              sentReasoning = cleanedReasoning;
+              if (nextDelta) send('reasoning', { delta: nextDelta });
             }
             if (contentDelta) {
               content += contentDelta;
-              send('content', { delta: contentDelta });
+              const cleanedContent = cleanAssistantText(content);
+              const nextDelta = cleanedContent.slice(sentContent.length);
+              sentContent = cleanedContent;
+              if (nextDelta) send('content', { delta: nextDelta });
             }
           }
         }
@@ -174,11 +191,17 @@ export default async function handler(request, context) {
           const contentDelta = delta.content ?? '';
           if (reasoningDelta) {
             reasoning += reasoningDelta;
-            send('reasoning', { delta: reasoningDelta });
+            const cleanedReasoning = cleanAssistantText(reasoning);
+            const nextDelta = cleanedReasoning.slice(sentReasoning.length);
+            sentReasoning = cleanedReasoning;
+            if (nextDelta) send('reasoning', { delta: nextDelta });
           }
           if (contentDelta) {
             content += contentDelta;
-            send('content', { delta: contentDelta });
+            const cleanedContent = cleanAssistantText(content);
+            const nextDelta = cleanedContent.slice(sentContent.length);
+            sentContent = cleanedContent;
+            if (nextDelta) send('content', { delta: nextDelta });
           }
         }
 

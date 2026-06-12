@@ -560,7 +560,7 @@ describe('App shell', () => {
     vi.useRealTimers();
   });
 
-  it('streams reasoning open, then folds it after the final answer and caps display blank lines', async () => {
+  it('streams reasoning open, then folds it after the final answer and removes display blank lines', async () => {
     vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
@@ -621,8 +621,8 @@ describe('App shell', () => {
       expect(document.querySelector('.reasoning-block')?.open).toBe(false);
       expect(document.body.textContent).toContain('first');
       expect(document.body.textContent).toContain('second');
-      expect(document.querySelectorAll('.message.assistant .message-bubble > p').length).toBeGreaterThanOrEqual(2);
-      expect(document.querySelector('.message.assistant .message-bubble').innerHTML).not.toContain('<br><br><br>');
+      expect(document.querySelector('.message.assistant .message-bubble br')).toBeTruthy();
+      expect(document.querySelector('.message.assistant .message-bubble').innerHTML).not.toContain('<br><br>');
     });
   });
 
@@ -673,7 +673,7 @@ describe('App shell', () => {
     });
   });
 
-  it('keeps markdown block boundaries while capping excessive display blank lines', async () => {
+  it('keeps markdown blocks while removing excessive display blank lines', async () => {
     vi.mocked(fetch).mockImplementation(async (path) => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
@@ -709,8 +709,55 @@ describe('App shell', () => {
       const bubble = document.querySelector('.message.assistant .message-bubble');
       expect(document.querySelector('.code-panel')).toBeTruthy();
       expect(document.querySelectorAll('.message.assistant li')).toHaveLength(2);
-      expect(bubble.innerHTML).not.toContain('<br><br><br>');
+      expect(bubble.innerHTML).not.toContain('<br><br>');
     });
+  });
+
+  it('does not force scroll to the bottom when the user has scrolled upward', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: Array.from({ length: 20 }, (_, index) => ({
+              id: `a${index}`,
+              role: 'assistant',
+              content: `answer ${index}`,
+              createdAt: '2026-06-12T04:20:00.000Z',
+            })),
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('answer 19');
+    });
+
+    const messages = document.querySelector('.messages');
+    Object.defineProperty(messages, 'scrollHeight', { configurable: true, value: 2000 });
+    Object.defineProperty(messages, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(messages, 'scrollTop', { configurable: true, value: 200, writable: true });
+    scrollIntoView.mockClear();
+
+    messages.dispatchEvent(new Event('scroll', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it('renders LaTeX formulas inside markdown messages', async () => {

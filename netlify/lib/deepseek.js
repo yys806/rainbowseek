@@ -8,6 +8,15 @@ export function normalizeModel(model, env = process.env) {
   return ALLOWED_MODELS.has(candidate) ? candidate : 'deepseek-v4-flash';
 }
 
+export function cleanAssistantText(value) {
+  return String(value ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+}
+
 export async function callDeepSeek(messages, env = process.env, options = {}) {
   const apiKey = getEnvValue(env, 'DEEPSEEK_API_KEY');
   if (!apiKey) {
@@ -43,9 +52,11 @@ export async function callDeepSeek(messages, env = process.env, options = {}) {
 
   return {
     role: 'assistant',
-    content: content.trim(),
+    content: cleanAssistantText(content),
     model,
-    reasoning: message.reasoning_content || message.reasoning ? String(message.reasoning_content || message.reasoning).trim() : null,
+    reasoning: message.reasoning_content || message.reasoning
+      ? cleanAssistantText(message.reasoning_content || message.reasoning)
+      : null,
     usage: payload.usage ?? null,
   };
 }
@@ -147,9 +158,9 @@ export async function streamDeepSeek(messages, env = process.env, options = {}) 
 
   return {
     role: 'assistant',
-    content: content.trim(),
+    content: cleanAssistantText(content),
     model,
-    reasoning: reasoning ? reasoning.trim() : null,
+    reasoning: reasoning ? cleanAssistantText(reasoning) : null,
     usage: null,
   };
 }
