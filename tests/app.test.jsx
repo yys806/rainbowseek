@@ -22,6 +22,23 @@ function jsonResponse(body, ok = true, status = ok ? 200 : 400) {
   };
 }
 
+function streamResponse(events, ok = true, status = ok ? 200 : 400) {
+  const encoder = new TextEncoder();
+  return {
+    ok,
+    status,
+    body: new ReadableStream({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        }
+        controller.close();
+      },
+    }),
+    json: async () => events[0] ?? {},
+  };
+}
+
 describe('App shell', () => {
   beforeEach(() => {
     vi.stubGlobal(
@@ -133,26 +150,32 @@ describe('App shell', () => {
         }
         return jsonResponse({ conversation: { ...conversations[0], messages: [] } });
       }
-      if (path === '/.netlify/functions/chat') {
+      if (path === '/.netlify/functions/chat-stream') {
         const body = JSON.parse(options.body);
         chatCalls.push(body);
         if (body.conversationId) {
           return jsonResponse({ error: 'Conversation not found' }, false, 404);
         }
-        return jsonResponse({
-          conversation: {
-            id: 'new-chat',
-            title: 'hello',
-            pinned: false,
-            createdAt: '2026-06-12T04:22:00.000Z',
-            updatedAt: '2026-06-12T04:22:00.000Z',
-            messages: [
-              { id: 'u1', role: 'user', content: body.message, createdAt: '2026-06-12T04:22:00.000Z' },
-              { id: 'a1', role: 'assistant', content: 'ok', createdAt: '2026-06-12T04:22:01.000Z' },
-            ],
+        return streamResponse([
+          { type: 'meta', conversationId: 'new-chat', title: 'hello', model: body.model },
+          { type: 'content', delta: 'o' },
+          { type: 'content', delta: 'k' },
+          {
+            type: 'done',
+            conversation: {
+              id: 'new-chat',
+              title: 'hello',
+              pinned: false,
+              createdAt: '2026-06-12T04:22:00.000Z',
+              updatedAt: '2026-06-12T04:22:00.000Z',
+              messages: [
+                { id: 'u1', role: 'user', content: body.message, createdAt: '2026-06-12T04:22:00.000Z' },
+                { id: 'a1', role: 'assistant', content: 'ok', createdAt: '2026-06-12T04:22:01.000Z' },
+              ],
+            },
+            conversations: [{ ...conversations[0], id: 'new-chat', title: 'hello' }],
           },
-          conversations: [{ ...conversations[0], id: 'new-chat', title: 'hello' }],
-        });
+        ]);
       }
       return jsonResponse({});
     });
@@ -196,19 +219,25 @@ describe('App shell', () => {
           },
         });
       }
-      if (path === '/.netlify/functions/chat') {
+      if (path === '/.netlify/functions/chat-stream') {
         const body = JSON.parse(options.body);
         chatCalls.push(body);
-        return jsonResponse({
-          conversation: {
-            ...conversations[0],
-            messages: [
-              { id: 'u2', role: 'user', content: body.message, createdAt: '2026-06-12T04:22:00.000Z' },
-              { id: 'a2', role: 'assistant', content: 'pro answer', model: body.model, createdAt: '2026-06-12T04:22:01.000Z' },
-            ],
+        return streamResponse([
+          { type: 'meta', conversationId: 'old-chat', title: 'Reply in markdown ...', model: body.model },
+          { type: 'content', delta: 'pro ' },
+          { type: 'content', delta: 'answer' },
+          {
+            type: 'done',
+            conversation: {
+              ...conversations[0],
+              messages: [
+                { id: 'u2', role: 'user', content: body.message, createdAt: '2026-06-12T04:22:00.000Z' },
+                { id: 'a2', role: 'assistant', content: 'pro answer', model: body.model, createdAt: '2026-06-12T04:22:01.000Z' },
+              ],
+            },
+            conversations,
           },
-          conversations,
-        });
+        ]);
       }
       return jsonResponse({});
     });
@@ -240,6 +269,49 @@ describe('App shell', () => {
         model: 'deepseek-v4-pro',
       });
       expect(document.body.textContent).toContain('pro answer');
+    });
+  });
+
+  it('renders markdown code blocks with a dedicated copy button', async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (path === '/.netlify/functions/conversations') {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [
+              {
+                id: 'a1',
+                role: 'assistant',
+                content: '```js\nconsole.log(\"rainbow\")\n```',
+                createdAt: '2026-06-12T04:20:00.000Z',
+              },
+            ],
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.querySelector('.code-panel')).toBeTruthy();
+    });
+
+    document.querySelector('.code-copy').click();
+
+    await vi.waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('console.log("rainbow")');
     });
   });
 });

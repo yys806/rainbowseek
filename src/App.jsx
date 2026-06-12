@@ -1,6 +1,7 @@
 import {
   Clipboard,
   Check,
+  Copy,
   Heart,
   LogOut,
   Menu,
@@ -52,14 +53,63 @@ function formatTime(value) {
 
 function MarkdownMessage({ content }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+    <ReactMarkdown components={{ code: CodeBlock, pre: ({ children }) => children }} remarkPlugins={[remarkGfm]}>
       {content}
     </ReactMarkdown>
   );
 }
 
+function CodeBlock({ children, className, ...props }) {
+  const code = String(children ?? '').replace(/\n$/, '');
+  const language = /language-(\w+)/.exec(className || '')?.[1];
+  const isInline = !className;
+  const [copied, setCopied] = useState(false);
+
+  if (isInline) {
+    return <code {...props}>{children}</code>;
+  }
+
+  async function copyCode() {
+    await copyText(code);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
+
+  return (
+    <div className="code-panel">
+      <div className="code-panel-header">
+        <span>{language || 'code'}</span>
+        <button className="code-copy" onClick={copyCode} type="button">
+          <Copy size={13} />
+          {copied ? '已复制' : '复制'}
+        </button>
+      </div>
+      <pre>
+        <code className={className} {...props}>
+          {children}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
 function modelLabel(model) {
   return model === 'deepseek-v4-pro' ? 'V4 Pro' : 'V4 Flash';
+}
+
+function updateStreamingMessage(conversation, messageId, { contentDelta = '', reasoningDelta = '' }) {
+  if (!conversation) return conversation;
+  return {
+    ...conversation,
+    messages: conversation.messages.map((message) => {
+      if (message.id !== messageId) return message;
+      return {
+        ...message,
+        content: `${message.content ?? ''}${contentDelta}`,
+        reasoning: reasoningDelta ? `${message.reasoning ?? ''}${reasoningDelta}` : message.reasoning,
+      };
+    }),
+  };
 }
 
 async function copyText(value) {
@@ -76,6 +126,43 @@ async function copyText(value) {
   textarea.select();
   document.execCommand('copy');
   textarea.remove();
+}
+
+async function readStreamingChat(response, handlers) {
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    const error = new Error(payload.error || '请求失败');
+    error.status = response.status;
+    throw error;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('当前浏览器不支持流式输出');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line);
+      await handlers[event.type]?.(event);
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    const event = JSON.parse(buffer);
+    await handlers[event.type]?.(event);
+  }
 }
 
 function LoginScreen({ onLogin }) {
@@ -369,7 +456,7 @@ function MessageList({ messages, loading, onCopy, onEdit }) {
           </div>
         </article>
       ))}
-      {loading && (
+      {loading && !messages.some((message) => message.id?.startsWith?.('streaming-')) && (
         <article className="message assistant">
           <div className="message-avatar">
             <Sparkles size={16} />
@@ -507,8 +594,12 @@ function ChatApp({ session, onLogout }) {
     if (conversationId) {
       body.conversationId = conversationId;
     }
-    return api('/.netlify/functions/chat', {
+    return fetch('/.netlify/functions/chat-stream', {
+      credentials: 'include',
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify(body),
     });
   }
@@ -524,27 +615,69 @@ function ChatApp({ session, onLogout }) {
       content: message,
       createdAt: new Date().toISOString(),
     };
+    const streamingAssistant = {
+      id: `streaming-${Date.now()}`,
+      role: 'assistant',
+      content: '',
+      reasoning: null,
+      model,
+      createdAt: new Date().toISOString(),
+    };
     const targetId = activeConversation?.id === activeId ? activeId : null;
     setActiveConversation((current) => ({
       ...(current ?? { id: targetId, title: '新的聊天', messages: [] }),
-      messages: [...(current?.messages ?? []), optimistic],
+      messages: [...(current?.messages ?? []), optimistic, streamingAssistant],
     }));
 
     try {
-      let payload;
+      let finalPayload = null;
+      async function readStreamingResponse(response, assistantId) {
+        await readStreamingChat(response, {
+          meta: ({ conversationId, title }) => {
+            setActiveId(conversationId);
+            setActiveConversation((current) => ({
+              ...(current ?? { id: conversationId, title, messages: [] }),
+              id: conversationId,
+              title: current?.title || title || '新的聊天',
+            }));
+          },
+          content: ({ delta }) => {
+            setActiveConversation((current) => updateStreamingMessage(current, assistantId, { contentDelta: delta }));
+          },
+          reasoning: ({ delta }) => {
+            setActiveConversation((current) => updateStreamingMessage(current, assistantId, { reasoningDelta: delta }));
+          },
+          done: (payload) => {
+            finalPayload = payload;
+          },
+          error: ({ error }) => {
+            throw new Error(error);
+          },
+        });
+      }
+
       try {
-        payload = await sendChatRequest({ conversationId: targetId, message, model });
+        const response = await sendChatRequest({ conversationId: targetId, message, model });
+        await readStreamingResponse(response, streamingAssistant.id);
       } catch (err) {
         if (targetId && (err.status === 404 || err.message === 'Conversation not found')) {
           await recoverMissingConversation({ silent: true });
-          payload = await sendChatRequest({ conversationId: null, message, model });
+          setActiveConversation({
+            id: null,
+            title: '新的聊天',
+            messages: [optimistic, streamingAssistant],
+          });
+          const response = await sendChatRequest({ conversationId: null, message, model });
+          await readStreamingResponse(response, streamingAssistant.id);
         } else {
           throw err;
         }
       }
-      setConversations(payload.conversations);
-      setActiveId(payload.conversation.id);
-      setActiveConversation(payload.conversation);
+      if (finalPayload) {
+        setConversations(finalPayload.conversations);
+        setActiveId(finalPayload.conversation.id);
+        setActiveConversation(finalPayload.conversation);
+      }
     } catch (err) {
       if (err.status === 404 || err.message === 'Conversation not found') {
         await recoverMissingConversation();

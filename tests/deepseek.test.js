@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { callDeepSeek, normalizeModel } from '../netlify/lib/deepseek.js';
+import { callDeepSeek, normalizeModel, streamDeepSeek } from '../netlify/lib/deepseek.js';
 
 describe('DeepSeek client', () => {
   afterEach(() => {
@@ -45,6 +45,46 @@ describe('DeepSeek client', () => {
       model: 'deepseek-v4-pro',
       reasoning: 'short reasoning',
       usage: { total_tokens: 8 },
+    });
+  });
+
+  it('streams content and reasoning deltas from DeepSeek SSE responses', async () => {
+    const encoder = new TextEncoder();
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      expect(JSON.parse(options.body).stream).toBe(true);
+      return {
+        ok: true,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"think "}}]}\n\n'));
+            controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'));
+            controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":" world"}}]}\n\n'));
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+          },
+        }),
+      };
+    }));
+
+    const contentDeltas = [];
+    const reasoningDeltas = [];
+    const assistant = await streamDeepSeek(
+      [{ role: 'user', content: 'hello' }],
+      { DEEPSEEK_API_KEY: 'test-key' },
+      {
+        model: 'deepseek-v4-flash',
+        onContent: (delta) => contentDeltas.push(delta),
+        onReasoning: (delta) => reasoningDeltas.push(delta),
+      },
+    );
+
+    expect(contentDeltas).toEqual(['hello', ' world']);
+    expect(reasoningDeltas).toEqual(['think ']);
+    expect(assistant).toMatchObject({
+      role: 'assistant',
+      content: 'hello world',
+      reasoning: 'think ',
+      model: 'deepseek-v4-flash',
     });
   });
 });
