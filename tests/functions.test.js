@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { json } from '../netlify/lib/http.js';
+import { buildApiMessages } from '../netlify/lib/prompt.js';
 
 describe('http helpers', () => {
   it('marks JSON responses as no-store so chat state is not cached', () => {
@@ -59,5 +60,22 @@ describe('login function', () => {
     );
 
     expect(response.statusCode).toBe(200);
+  });
+});
+
+describe('chat prompt builder', () => {
+  it('tells the model to answer only the latest user message while preserving context', () => {
+    const apiMessages = buildApiMessages([
+      { role: 'user', content: 'old question' },
+      { role: 'assistant', content: 'old answer' },
+      { role: 'user', content: 'current question' },
+    ]);
+
+    expect(apiMessages[0]).toMatchObject({ role: 'system' });
+    expect(apiMessages[0].content).toContain('Answer only the latest user message');
+    expect(apiMessages[0].content).toContain('previous conversation only to understand context');
+    expect(apiMessages[1].content).toBe('old question');
+    expect(apiMessages[3].content).toContain('Current user message to answer');
+    expect(apiMessages[3].content).toContain('current question');
   });
 });

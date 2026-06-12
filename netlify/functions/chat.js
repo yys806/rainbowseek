@@ -1,6 +1,7 @@
 import { callDeepSeek } from '../lib/deepseek.js';
 import { createConversationService } from '../lib/storage.js';
 import { handleError, json, methodNotAllowed, parseBody, requireAuth } from '../lib/http.js';
+import { buildApiMessages } from '../lib/prompt.js';
 
 function titleFromMessage(message) {
   const normalized = message.trim().replace(/\s+/g, ' ');
@@ -31,13 +32,7 @@ export async function handler(event, context = {}) {
 
     await service.appendMessages(conversation.id, [{ role: 'user', content: body.message }]);
     const latest = await service.getConversation(conversation.id);
-    const apiMessages = [
-      { role: 'system', content: 'You are a warm, clear, and helpful assistant. Answer in the user language.' },
-      ...latest.messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-      })),
-    ];
+    const apiMessages = buildApiMessages(latest.messages);
 
     const assistant = await callDeepSeek(apiMessages, env, { userId: session.username, model: body.model });
     const updated = await service.appendMessages(conversation.id, [assistant]);

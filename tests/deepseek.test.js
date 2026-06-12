@@ -48,6 +48,29 @@ describe('DeepSeek client', () => {
     });
   });
 
+  it('removes blank lines from non-streamed assistant content', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: 'first paragraph\n\n\nsecond paragraph',
+            },
+          },
+        ],
+      }),
+    })));
+
+    const assistant = await callDeepSeek(
+      [{ role: 'user', content: 'hello' }],
+      { DEEPSEEK_API_KEY: 'test-key' },
+      { model: 'deepseek-v4-flash' },
+    );
+
+    expect(assistant.content).toBe('first paragraph\nsecond paragraph');
+  });
+
   it('streams content and reasoning deltas from DeepSeek SSE responses', async () => {
     const encoder = new TextEncoder();
     vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
@@ -83,8 +106,31 @@ describe('DeepSeek client', () => {
     expect(assistant).toMatchObject({
       role: 'assistant',
       content: 'hello world',
-      reasoning: 'think ',
+      reasoning: 'think',
       model: 'deepseek-v4-flash',
     });
+  });
+
+  it('removes blank lines from streamed assistant content', async () => {
+    const encoder = new TextEncoder();
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"first\\n\\n"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"second"}}]}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      }),
+    })));
+
+    const assistant = await streamDeepSeek(
+      [{ role: 'user', content: 'hello' }],
+      { DEEPSEEK_API_KEY: 'test-key' },
+      { model: 'deepseek-v4-flash' },
+    );
+
+    expect(assistant.content).toBe('first\nsecond');
   });
 });

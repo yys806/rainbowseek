@@ -3,6 +3,15 @@ import { getEnvValue } from './auth.js';
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
 const ALLOWED_MODELS = new Set(['deepseek-v4-flash', 'deepseek-v4-pro']);
 
+export function compactLines(value) {
+  return String(value ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n+/g, '\n')
+    .trim();
+}
+
 export function normalizeModel(model, env = process.env) {
   const candidate = typeof model === 'string' ? model : getEnvValue(env, 'DEEPSEEK_MODEL');
   return ALLOWED_MODELS.has(candidate) ? candidate : 'deepseek-v4-flash';
@@ -43,9 +52,9 @@ export async function callDeepSeek(messages, env = process.env, options = {}) {
 
   return {
     role: 'assistant',
-    content,
+    content: compactLines(content),
     model,
-    reasoning: message.reasoning_content || message.reasoning || null,
+    reasoning: message.reasoning_content || message.reasoning ? compactLines(message.reasoning_content || message.reasoning) : null,
     usage: payload.usage ?? null,
   };
 }
@@ -147,9 +156,9 @@ export async function streamDeepSeek(messages, env = process.env, options = {}) 
 
   return {
     role: 'assistant',
-    content,
+    content: compactLines(content),
     model,
-    reasoning: reasoning || null,
+    reasoning: reasoning ? compactLines(reasoning) : null,
     usage: null,
   };
 }
