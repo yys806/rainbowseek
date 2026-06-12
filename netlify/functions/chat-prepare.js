@@ -41,7 +41,10 @@ export async function handler(event, context = {}) {
         updatedAt: latest.updatedAt,
         messages: latest.messages,
       },
-      apiMessages: buildApiMessages(latest.messages),
+      apiMessages: buildApiMessages(latest.messages, {
+        imageDescription: body.imageDescription,
+        webSearch: body.webSearch,
+      }),
     });
   } catch (error) {
     return handleError(error);

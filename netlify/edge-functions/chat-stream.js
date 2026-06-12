@@ -1,6 +1,11 @@
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
+const SILICONFLOW_URL = 'https://api.siliconflow.cn/v1/chat/completions';
+const TAVILY_URL = 'https://api.tavily.com/search';
 const COOKIE_NAME = 'deepseek_session';
 const ALLOWED_MODELS = new Set(['deepseek-v4-flash', 'deepseek-v4-pro']);
+const VISION_MODEL = 'Qwen/Qwen3-VL-8B-Instruct';
+const MAX_IMAGES = 4;
+const MAX_DATA_URL_LENGTH = 8 * 1024 * 1024;
 
 function getCookie(request, name) {
   const header = request.headers.get('cookie') ?? '';
@@ -13,6 +18,21 @@ function getCookie(request, name) {
 
 function normalizeModel(model) {
   return ALLOWED_MODELS.has(model) ? model : 'deepseek-v4-flash';
+}
+
+function normalizeImages(images) {
+  if (!Array.isArray(images)) return [];
+  return images
+    .filter((image) => {
+      if (!image || typeof image.dataUrl !== 'string') return false;
+      if (!image.dataUrl.startsWith('data:image/')) return false;
+      return image.dataUrl.length <= MAX_DATA_URL_LENGTH;
+    })
+    .slice(0, MAX_IMAGES)
+    .map((image) => ({
+      dataUrl: image.dataUrl,
+      name: typeof image.name === 'string' ? image.name.slice(0, 120) : 'image',
+    }));
 }
 
 function streamEvent(type, payload = {}) {
@@ -54,6 +74,137 @@ function json(status, body) {
   });
 }
 
+async function describeImages(images, question) {
+  const normalizedImages = normalizeImages(images);
+  if (normalizedImages.length === 0) return null;
+
+  const apiKey = Netlify.env.get('SILICONFLOW_API_KEY');
+  if (!apiKey) {
+    throw new Error('SILICONFLOW_API_KEY is not configured');
+  }
+
+  const response = await fetch(SILICONFLOW_URL, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: VISION_MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: [
+                '请仔细识别这些图片，输出客观、完整的图片内容描述。',
+                '如果图片里有文字、公式、表格、代码、截图界面，请尽量逐项转写。',
+                `用户接下来要问的问题是：${question || '请描述图片'}`,
+              ].join('\n'),
+            },
+            ...normalizedImages.map((image) => ({
+              type: 'image_url',
+              image_url: { url: image.dataUrl },
+            })),
+          ],
+        },
+      ],
+      max_tokens: 1200,
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `SiliconFlow vision API failed with ${response.status}`);
+  }
+  const content = payload?.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error('SiliconFlow vision API returned an empty description');
+  }
+  return cleanAssistantText(content);
+}
+
+async function planSearch(message, apiKey) {
+  const response = await fetch(DEEPSEEK_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-v4-flash',
+      messages: [
+        {
+          role: 'system',
+          content: 'Decide whether answering the user needs fresh web search. Return only JSON: {"search":true|false,"query":"..."}',
+        },
+        { role: 'user', content: message },
+      ],
+      stream: false,
+      max_tokens: 120,
+      user: 'rainbow',
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `DeepSeek search planner failed with ${response.status}`);
+  }
+  try {
+    const parsed = JSON.parse(String(payload?.choices?.[0]?.message?.content ?? '').replace(/```json|```/g, '').trim());
+    return {
+      search: Boolean(parsed.search),
+      query: typeof parsed.query === 'string' ? parsed.query.trim() : '',
+    };
+  } catch {
+    return { search: false, query: '' };
+  }
+}
+
+async function searchWeb(query) {
+  const apiKey = Netlify.env.get('TAVILY_API_KEY');
+  if (!apiKey) {
+    throw new Error('TAVILY_API_KEY is not configured');
+  }
+
+  const response = await fetch(TAVILY_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      search_depth: 'advanced',
+      max_results: 5,
+      include_answer: true,
+      include_raw_content: false,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error || payload?.message || `Tavily search failed with ${response.status}`);
+  }
+
+  return {
+    query,
+    answer: payload.answer || '',
+    results: (Array.isArray(payload.results) ? payload.results : []).slice(0, 5).map((result) => ({
+      title: result.title || '',
+      url: result.url || '',
+      content: result.content || '',
+    })),
+  };
+}
+
+async function maybeSearchWeb(message, enabled, deepseekApiKey) {
+  if (!enabled) return null;
+  const plan = await planSearch(message, deepseekApiKey);
+  if (!plan.search || !plan.query) return null;
+  return searchWeb(plan.query);
+}
+
 export default async function handler(request, context) {
   if (request.method !== 'POST') {
     return json(405, { error: 'Method not allowed' });
@@ -74,6 +225,15 @@ export default async function handler(request, context) {
   }
 
   const model = normalizeModel(body.model);
+  let imageDescription = null;
+  let webSearch = null;
+  try {
+    imageDescription = await describeImages(body.images, body.message);
+    webSearch = await maybeSearchWeb(body.message, Boolean(body.webSearchEnabled), apiKey);
+  } catch (error) {
+    return json(502, { error: error.message || 'Failed to prepare visual/search context' });
+  }
+
   const prepareResponse = await fetch(new URL('/.netlify/functions/chat-prepare', request.url), {
     method: 'POST',
     headers: {
@@ -84,6 +244,8 @@ export default async function handler(request, context) {
       conversationId: body.conversationId,
       message: body.message,
       model,
+      imageDescription,
+      webSearch,
     }),
   });
   const prepared = await prepareResponse.json().catch(() => ({}));

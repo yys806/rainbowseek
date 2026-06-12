@@ -1,7 +1,9 @@
 import {
+  Camera,
   Check,
   Copy,
   Heart,
+  ImagePlus,
   LogOut,
   Menu,
   MessageCircle,
@@ -14,6 +16,7 @@ import {
   Send,
   Sparkles,
   Trash2,
+  Wifi,
   X,
 } from 'lucide-react';
 import React from 'react';
@@ -203,6 +206,41 @@ async function copyText(value) {
   textarea.select();
   document.execCommand('copy');
   textarea.remove();
+}
+
+function fileToImageData(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result ?? '');
+      const image = new Image();
+      image.onload = () => {
+        const maxSide = 1280;
+        const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d')?.drawImage(image, 0, 0, width, height);
+        resolve({
+          dataUrl: canvas.toDataURL('image/jpeg', 0.84),
+          name: file.name || 'image',
+        });
+      };
+      image.onerror = () => resolve({ dataUrl, name: file.name || 'image' });
+      image.src = dataUrl;
+    };
+    reader.onerror = () => reject(new Error('图片读取失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function filesToImages(files) {
+  const imageFiles = Array.from(files ?? [])
+    .filter((file) => file.type?.startsWith('image/'))
+    .slice(0, 4);
+  return Promise.all(imageFiles.map(fileToImageData));
 }
 
 async function readStreamingChat(response, handlers) {
@@ -563,12 +601,42 @@ function MessageList({ messages, loading, onCopy, onEdit, forceScrollSignal = 0 
   );
 }
 
-function Composer({ disabled, model, onModelChange, onSend, value, onChange, onFocus }) {
+function Composer({
+  disabled,
+  images,
+  model,
+  onImageAdd,
+  onImageRemove,
+  onModelChange,
+  onSearchToggle,
+  onSend,
+  value,
+  onChange,
+  onFocus,
+  webSearchEnabled,
+}) {
+  const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+
   function submit(event) {
     event.preventDefault();
     const message = value.trim();
-    if (!message || disabled) return;
-    onSend(message, model);
+    if ((!message && images.length === 0) || disabled) return;
+    onSend(message || '请识别并回答图片内容。', model);
+  }
+
+  async function addFiles(files) {
+    const nextImages = await filesToImages(files);
+    if (nextImages.length > 0) {
+      onImageAdd(nextImages);
+    }
+  }
+
+  async function handlePaste(event) {
+    const imageFiles = Array.from(event.clipboardData?.files ?? []).filter((file) => file.type?.startsWith('image/'));
+    if (imageFiles.length > 0) {
+      await addFiles(imageFiles);
+    }
   }
 
   return (
@@ -585,8 +653,70 @@ function Composer({ disabled, model, onModelChange, onSend, value, onChange, onF
             {modelLabel(item)}
           </button>
         ))}
+        <button
+          aria-label="联网搜索"
+          className={`tool-chip ${webSearchEnabled ? 'active' : ''}`}
+          onClick={() => onSearchToggle((value) => !value)}
+          title="联网搜索"
+          type="button"
+        >
+          <Wifi size={14} />
+          搜索
+        </button>
       </div>
+      {images.length > 0 && (
+        <div className="image-preview-list">
+          {images.map((image, index) => (
+            <div className="image-preview" key={`${image.name}-${index}`}>
+              <img alt={image.name || `image-${index + 1}`} src={image.dataUrl} />
+              <button aria-label="移除图片" onClick={() => onImageRemove(index)} type="button">
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <form className="composer" onSubmit={submit}>
+        <input
+          accept="image/*"
+          aria-label="上传图片"
+          multiple
+          onChange={(event) => {
+            addFiles(event.target.files).catch(() => {});
+            event.target.value = '';
+          }}
+          ref={fileInputRef}
+          type="file"
+        />
+        <input
+          accept="image/*"
+          aria-label="拍照上传"
+          capture="environment"
+          onChange={(event) => {
+            addFiles(event.target.files).catch(() => {});
+            event.target.value = '';
+          }}
+          ref={cameraInputRef}
+          type="file"
+        />
+        <button
+          aria-label="上传图片"
+          className="composer-icon-button"
+          onClick={() => fileInputRef.current?.click()}
+          title="上传图片"
+          type="button"
+        >
+          <ImagePlus size={18} />
+        </button>
+        <button
+          aria-label="拍照"
+          className="composer-icon-button camera-button"
+          onClick={() => cameraInputRef.current?.click()}
+          title="拍照"
+          type="button"
+        >
+          <Camera size={18} />
+        </button>
         <textarea
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
@@ -598,11 +728,12 @@ function Composer({ disabled, model, onModelChange, onSend, value, onChange, onF
               submit(event);
             }
           }}
+          onPaste={handlePaste}
           placeholder="发消息给 rainbowseek..."
           rows={1}
           value={value}
         />
-        <button aria-label="发送" className="send-button" disabled={disabled || !value.trim()} type="submit">
+        <button aria-label="发送" className="send-button" disabled={disabled || (!value.trim() && images.length === 0)} type="submit">
           <Send size={18} />
         </button>
       </form>
@@ -621,6 +752,8 @@ function ChatApp({ session, onLogout }) {
   const [dialog, setDialog] = useState(null);
   const [composerValue, setComposerValue] = useState('');
   const [composerFocusScrollSignal, setComposerFocusScrollSignal] = useState(0);
+  const [composerImages, setComposerImages] = useState([]);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash');
   const [notice, setNotice] = useState('');
   const streamingConversationIdRef = useRef(null);
@@ -751,10 +884,13 @@ function ChatApp({ session, onLogout }) {
     setMobileOpen(false);
   }
 
-  async function sendChatRequest({ conversationId, message, model }) {
-    const body = { message, model };
+  async function sendChatRequest({ conversationId, images = [], message, model, webSearchEnabled: searchEnabled = false }) {
+    const body = { message, model, webSearchEnabled: Boolean(searchEnabled) };
     if (conversationId) {
       body.conversationId = conversationId;
+    }
+    if (images.length > 0) {
+      body.images = images;
     }
     return fetch('/.netlify/functions/chat-stream', {
       credentials: 'include',
@@ -773,10 +909,12 @@ function ChatApp({ session, onLogout }) {
     setError('');
     setNotice('');
     setComposerValue('');
+    const imagesForRequest = composerImages;
+    setComposerImages([]);
     const optimistic = {
       id: `pending-${Date.now()}`,
       role: 'user',
-      content: message,
+      content: imagesForRequest.length > 0 ? `${message}\n\n[已上传 ${imagesForRequest.length} 张图片]` : message,
       createdAt: new Date().toISOString(),
     };
     const streamingAssistant = {
@@ -837,7 +975,13 @@ function ChatApp({ session, onLogout }) {
       }
 
       try {
-        const response = await sendChatRequest({ conversationId: targetId, message, model });
+        const response = await sendChatRequest({
+          conversationId: targetId,
+          images: imagesForRequest,
+          message,
+          model,
+          webSearchEnabled,
+        });
         await readStreamingResponse(response, streamingAssistant.id);
       } catch (err) {
         if (requestSeqRef.current !== requestSeq) return;
@@ -848,7 +992,13 @@ function ChatApp({ session, onLogout }) {
             title: '新的聊天',
             messages: [optimistic, streamingAssistant],
           });
-          const response = await sendChatRequest({ conversationId: null, message, model });
+          const response = await sendChatRequest({
+            conversationId: null,
+            images: imagesForRequest,
+            message,
+            model,
+            webSearchEnabled,
+          });
           await readStreamingResponse(response, streamingAssistant.id);
         } else {
           throw err;
@@ -1027,12 +1177,17 @@ function ChatApp({ session, onLogout }) {
         <div className="composer-wrap">
           <Composer
             disabled={loading}
+            images={composerImages}
             model={selectedModel}
             onChange={setComposerValue}
             onFocus={() => setComposerFocusScrollSignal((value) => value + 1)}
+            onImageAdd={(images) => setComposerImages((current) => [...current, ...images].slice(0, 4))}
+            onImageRemove={(index) => setComposerImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}
             onModelChange={setSelectedModel}
+            onSearchToggle={setWebSearchEnabled}
             onSend={sendMessage}
             value={composerValue}
+            webSearchEnabled={webSearchEnabled}
           />
           <p>支持 Markdown 渲染。内容由 DeepSeek 生成，请重要信息自行核对。</p>
         </div>

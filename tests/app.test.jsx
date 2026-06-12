@@ -53,7 +53,8 @@ describe('App shell', () => {
   });
 
   it('renders the login screen when there is no session', async () => {
-    createRoot(document.getElementById('root')).render(<App />);
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain('rainbowseek');
       expect(document.body.textContent).toContain('DeepSeek');
@@ -76,7 +77,8 @@ describe('App shell', () => {
       return jsonResponse({});
     });
 
-    createRoot(document.getElementById('root')).render(<App />);
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain('Reply in markdown ...');
     });
@@ -255,8 +257,17 @@ describe('App shell', () => {
 
     await vi.waitFor(() => {
       expect(chatCalls).toHaveLength(2);
-      expect(chatCalls[0]).toEqual({ conversationId: 'old-chat', message: 'hello', model: 'deepseek-v4-flash' });
-      expect(chatCalls[1]).toEqual({ message: 'hello', model: 'deepseek-v4-flash' });
+      expect(chatCalls[0]).toEqual({
+        conversationId: 'old-chat',
+        message: 'hello',
+        model: 'deepseek-v4-flash',
+        webSearchEnabled: false,
+      });
+      expect(chatCalls[1]).toEqual({
+        message: 'hello',
+        model: 'deepseek-v4-flash',
+        webSearchEnabled: false,
+      });
       expect(document.body.textContent).toContain('ok');
       expect(conversationLoads.some((path) => path.includes('new-chat'))).toBe(false);
       expect(document.body.textContent).not.toContain('这段聊天已经不存在');
@@ -847,6 +858,93 @@ describe('App shell', () => {
     await vi.waitFor(() => {
       expect(scrollIntoView).toHaveBeenCalled();
     });
+  });
+
+  it('sends selected images and the web search setting with chat requests', async () => {
+    const chatBodies = [];
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations: [] });
+      }
+      if (path === '/.netlify/functions/chat-stream') {
+        chatBodies.push(JSON.parse(options.body));
+        return streamResponse([
+          { type: 'meta', conversationId: 'image-chat', title: 'image chat', model: 'deepseek-v4-flash' },
+          { type: 'content', delta: 'ok' },
+          {
+            type: 'done',
+            conversation: {
+              id: 'image-chat',
+              title: 'image chat',
+              pinned: false,
+              createdAt: '2026-06-12T04:22:00.000Z',
+              updatedAt: '2026-06-12T04:22:00.000Z',
+              messages: [
+                { id: 'u1', role: 'user', content: '看看图片', createdAt: '2026-06-12T04:22:00.000Z' },
+                { id: 'a1', role: 'assistant', content: 'ok', createdAt: '2026-06-12T04:22:01.000Z' },
+              ],
+            },
+            conversations: [],
+          },
+        ]);
+      }
+      return jsonResponse({});
+    });
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('rainbowseek');
+    });
+
+    const file = new File(['image'], 'photo.png', { type: 'image/png' });
+    const readerResult = 'data:image/png;base64,aW1hZ2U=';
+    const originalFileReader = globalThis.FileReader;
+    const originalImage = globalThis.Image;
+    class MockFileReader {
+      readAsDataURL() {
+        this.result = readerResult;
+        this.onload?.();
+      }
+    }
+    class MockImage {
+      set src(_value) {
+        this.onerror?.();
+      }
+    }
+    globalThis.FileReader = MockFileReader;
+    globalThis.Image = MockImage;
+
+    document.querySelector('button[aria-label="联网搜索"]').click();
+    const fileInput = document.querySelector('input[type="file"]');
+    Object.defineProperty(fileInput, 'files', { configurable: true, value: [file] });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.querySelector('.image-preview img')).toBeTruthy();
+    });
+
+    const textarea = document.querySelector('.composer textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, '看看图片');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.querySelector('.send-button').disabled).toBe(false);
+    });
+    document.querySelector('.send-button').click();
+
+    await vi.waitFor(() => {
+      expect(chatBodies).toHaveLength(1);
+      expect(chatBodies[0]).toMatchObject({
+        message: '看看图片',
+        webSearchEnabled: true,
+      });
+      expect(chatBodies[0].images).toEqual([{ dataUrl: readerResult, name: 'photo.png' }]);
+    });
+    globalThis.FileReader = originalFileReader;
+    globalThis.Image = originalImage;
+    root.unmount();
   });
 
   it('renders LaTeX formulas inside markdown messages', async () => {

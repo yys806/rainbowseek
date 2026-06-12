@@ -81,4 +81,29 @@ describe('chat prompt builder', () => {
     expect(apiMessages[3].content).toContain('Current user message to answer');
     expect(apiMessages[3].content).toContain('current question');
   });
+
+  it('adds image descriptions and web search results only to the latest user message', () => {
+    const apiMessages = buildApiMessages(
+      [
+        { role: 'user', content: 'old question' },
+        { role: 'assistant', content: 'old answer' },
+        { role: 'user', content: 'current question' },
+      ],
+      {
+        imageDescription: '图里有一张数学题截图。',
+        webSearch: {
+          query: 'current question',
+          answer: 'search summary',
+          results: [{ title: 'Source A', url: 'https://example.com/a', content: 'source content' }],
+        },
+      },
+    );
+
+    expect(apiMessages[1].content).toBe('old question');
+    expect(apiMessages[3].content).toContain('current question');
+    expect(apiMessages[3].content).toContain('图片识别结果');
+    expect(apiMessages[3].content).toContain('图里有一张数学题截图。');
+    expect(apiMessages[3].content).toContain('联网搜索结果');
+    expect(apiMessages[3].content).toContain('https://example.com/a');
+  });
 });
