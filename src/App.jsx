@@ -19,7 +19,10 @@ import {
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import 'katex/dist/katex.min.css';
 import meAvatar from './image/me.jpg';
 import rainbowseekAvatar from './image/rainbowseek.png';
 
@@ -61,10 +64,20 @@ function formatTime(value) {
 
 function MarkdownMessage({ content }) {
   return (
-    <ReactMarkdown components={{ code: CodeBlock, pre: ({ children }) => children }} remarkPlugins={[remarkGfm]}>
-      {content}
+    <ReactMarkdown
+      components={{ code: CodeBlock, pre: ({ children }) => children }}
+      rehypePlugins={[rehypeKatex]}
+      remarkPlugins={[remarkGfm, remarkMath]}
+    >
+      {normalizeMathDelimiters(content)}
     </ReactMarkdown>
   );
+}
+
+function normalizeMathDelimiters(value) {
+  return String(value ?? '')
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, expression) => `$$${expression}$$`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, expression) => `$${expression}$`);
 }
 
 function CodeBlock({ children, className, ...props }) {
@@ -555,36 +568,43 @@ function ChatApp({ session, onLogout }) {
   const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash');
   const [notice, setNotice] = useState('');
   const streamingConversationIdRef = useRef(null);
+  const requestSeqRef = useRef(0);
+  const activeIdRef = useRef(null);
+  const deletedConversationIdsRef = useRef(new Set());
 
   const activeMessages = activeConversation?.messages ?? [];
   const activeTitle = useMemo(() => activeConversation?.title || '新的聊天', [activeConversation]);
 
-  async function refreshConversations(nextActiveId = activeId, options = {}) {
+  function updateActiveId(id) {
+    activeIdRef.current = id;
+    setActiveId(id);
+  }
+
+  async function refreshConversations(options = {}) {
     const payload = await api('/.netlify/functions/conversations', { cacheBust: true });
-    const nextConversations = payload.conversations;
+    const nextConversations = payload.conversations.filter(
+      (conversation) => !deletedConversationIdsRef.current.has(conversation.id),
+    );
+    const currentActiveId = activeIdRef.current;
     setConversations(nextConversations);
-    if (options.keepNewChat) {
-      return nextConversations;
-    }
-    if (nextActiveId && nextConversations.some((conversation) => conversation.id === nextActiveId)) {
-      return nextConversations;
-    }
-    if (nextConversations[0]) {
-      setActiveId(nextConversations[0].id);
-    } else {
-      setActiveId(null);
+    if (
+      currentActiveId &&
+      !options.keepActive &&
+      !nextConversations.some((conversation) => conversation.id === currentActiveId)
+    ) {
+      updateActiveId(null);
       setActiveConversation(null);
     }
     return nextConversations;
   }
 
   async function recoverMissingConversation(options = {}) {
-    setActiveId(null);
+    updateActiveId(null);
     setActiveConversation(null);
     if (!options.silent) {
       setError('这段聊天已经不存在，已为你切回新的聊天。');
     }
-    await refreshConversations(null, { keepNewChat: true });
+    await refreshConversations();
   }
 
   async function loadConversation(id) {
@@ -594,9 +614,15 @@ function ChatApp({ session, onLogout }) {
     }
     try {
       const payload = await api(`/.netlify/functions/conversation?id=${encodeURIComponent(id)}`, { cacheBust: true });
+      if (activeIdRef.current !== id) {
+        return;
+      }
       setActiveConversation(payload.conversation);
     } catch (err) {
       if (err.status === 404 || err.message === 'Conversation not found') {
+        if (activeIdRef.current !== id) {
+          return;
+        }
         await recoverMissingConversation();
         return;
       }
@@ -616,16 +642,26 @@ function ChatApp({ session, onLogout }) {
   }, [activeId]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return undefined;
+    }
     let cancelled = false;
 
     async function syncVisibleConversation() {
-      if (cancelled || loading || streamingConversationIdRef.current || document.visibilityState === 'hidden') {
+      if (
+        cancelled ||
+        loading ||
+        streamingConversationIdRef.current ||
+        typeof document === 'undefined' ||
+        document.visibilityState === 'hidden'
+      ) {
         return;
       }
       try {
-        await refreshConversations(activeId, { keepNewChat: !activeId });
-        if (activeId && !cancelled) {
-          await loadConversation(activeId);
+        const currentActiveId = activeIdRef.current;
+        await refreshConversations({ keepActive: Boolean(currentActiveId) });
+        if (currentActiveId && !cancelled) {
+          await loadConversation(currentActiveId);
         }
       } catch (err) {
         if (!cancelled) {
@@ -636,7 +672,7 @@ function ChatApp({ session, onLogout }) {
 
     const interval = window.setInterval(syncVisibleConversation, 3500);
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         syncVisibleConversation();
       }
     };
@@ -649,7 +685,10 @@ function ChatApp({ session, onLogout }) {
   }, [activeId, loading]);
 
   async function createConversation() {
-    setActiveId(null);
+    requestSeqRef.current += 1;
+    streamingConversationIdRef.current = null;
+    setLoading(false);
+    updateActiveId(null);
     setActiveConversation(null);
     setMobileOpen(false);
   }
@@ -670,6 +709,8 @@ function ChatApp({ session, onLogout }) {
   }
 
   async function sendMessage(message, model = selectedModel) {
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
     setLoading(true);
     setError('');
     setNotice('');
@@ -700,8 +741,9 @@ function ChatApp({ session, onLogout }) {
       async function readStreamingResponse(response, assistantId) {
         await readStreamingChat(response, {
           meta: ({ conversationId, title }) => {
+            if (requestSeqRef.current !== requestSeq) return;
             streamingConversationIdRef.current = conversationId;
-            setActiveId(conversationId);
+            updateActiveId(conversationId);
             setActiveConversation((current) => ({
               ...(current ?? { id: conversationId, title, messages: [] }),
               id: conversationId,
@@ -709,12 +751,15 @@ function ChatApp({ session, onLogout }) {
             }));
           },
           content: ({ delta }) => {
+            if (requestSeqRef.current !== requestSeq) return;
             setActiveConversation((current) => updateStreamingMessage(current, assistantId, { contentDelta: delta }));
           },
           reasoning: ({ delta }) => {
+            if (requestSeqRef.current !== requestSeq) return;
             setActiveConversation((current) => updateStreamingMessage(current, assistantId, { reasoningDelta: delta }));
           },
           done: (payload) => {
+            if (requestSeqRef.current !== requestSeq) return;
             finalPayload = {
               ...payload,
               conversation: {
@@ -739,6 +784,7 @@ function ChatApp({ session, onLogout }) {
         const response = await sendChatRequest({ conversationId: targetId, message, model });
         await readStreamingResponse(response, streamingAssistant.id);
       } catch (err) {
+        if (requestSeqRef.current !== requestSeq) return;
         if (targetId && (err.status === 404 || err.message === 'Conversation not found')) {
           await recoverMissingConversation({ silent: true });
           setActiveConversation({
@@ -753,20 +799,28 @@ function ChatApp({ session, onLogout }) {
         }
       }
       if (finalPayload) {
+        if (requestSeqRef.current !== requestSeq) return;
         streamingConversationIdRef.current = null;
-        setConversations(finalPayload.conversations);
-        setActiveId(finalPayload.conversation.id);
+        setConversations(
+          finalPayload.conversations.filter(
+            (conversation) => !deletedConversationIdsRef.current.has(conversation.id),
+          ),
+        );
+        updateActiveId(finalPayload.conversation.id);
         setActiveConversation(finalPayload.conversation);
       }
     } catch (err) {
+      if (requestSeqRef.current !== requestSeq) return;
       if (err.status === 404 || err.message === 'Conversation not found') {
         await recoverMissingConversation();
       } else {
         setError(err.message);
       }
     } finally {
-      streamingConversationIdRef.current = null;
-      setLoading(false);
+      if (requestSeqRef.current === requestSeq) {
+        streamingConversationIdRef.current = null;
+        setLoading(false);
+      }
     }
   }
 
@@ -798,8 +852,8 @@ function ChatApp({ session, onLogout }) {
         body: JSON.stringify({ title }),
       });
       setActiveConversation((current) => (current?.id === conversation.id ? payload.conversation : current));
+      setConversations((current) => current.map((item) => (item.id === conversation.id ? payload.conversation : item)));
       setDialog(null);
-      await refreshConversations(conversation.id);
     } catch (err) {
       if (err.status === 404 || err.message === 'Conversation not found') {
         setDialog(null);
@@ -817,7 +871,7 @@ function ChatApp({ session, onLogout }) {
         body: JSON.stringify({ pinned: !conversation.pinned }),
       });
       setActiveConversation((current) => (current?.id === conversation.id ? payload.conversation : current));
-      await refreshConversations(conversation.id);
+      setConversations((current) => current.map((item) => (item.id === conversation.id ? payload.conversation : item)));
     } catch (err) {
       if (err.status === 404 || err.message === 'Conversation not found') {
         await recoverMissingConversation();
@@ -834,12 +888,15 @@ function ChatApp({ session, onLogout }) {
       await api(`/.netlify/functions/conversation?id=${encodeURIComponent(conversation.id)}`, {
         method: 'DELETE',
       });
+      deletedConversationIdsRef.current.add(conversation.id);
       const nextConversations = conversations.filter((item) => item.id !== conversation.id);
       setDialog(null);
       setConversations(nextConversations);
       if (activeId === conversation.id) {
-        const nextActive = nextConversations[0] ?? null;
-        setActiveId(nextActive?.id ?? null);
+        requestSeqRef.current += 1;
+        streamingConversationIdRef.current = null;
+        setLoading(false);
+        updateActiveId(null);
         setActiveConversation(null);
       }
     } catch (err) {
@@ -870,7 +927,7 @@ function ChatApp({ session, onLogout }) {
         onPin={togglePin}
         onRename={(conversation) => setDialog({ type: 'rename', conversation, value: conversation.title })}
         onSelect={(id) => {
-          setActiveId(id);
+          updateActiveId(id);
           setMobileOpen(false);
         }}
         sidebarOpen={sidebarOpen}

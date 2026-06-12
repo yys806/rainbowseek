@@ -122,6 +122,37 @@ describe('App shell', () => {
     });
   });
 
+  it('starts on a new chat instead of opening the most recent conversation', async () => {
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [{ id: 'a1', role: 'assistant', content: 'old answer', createdAt: '2026-06-12T04:20:00.000Z' }],
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('新的聊天');
+      expect(document.body.textContent).not.toContain('old answer');
+      expect(fetch).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^\/\.netlify\/functions\/conversation\?id=old-chat&_/),
+        expect.any(Object),
+      );
+    });
+  });
+
   it('recovers stale conversation ids without showing the raw not found error', async () => {
     vi.mocked(fetch).mockImplementation(async (path) => {
       if (path === '/.netlify/functions/session') {
@@ -137,6 +168,11 @@ describe('App shell', () => {
     });
 
     createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+
     await vi.waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
         expect.stringMatching(/^\/\.netlify\/functions\/conversation\?id=old-chat&_/),
@@ -201,6 +237,13 @@ describe('App shell', () => {
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain('Reply in markdown ...');
     });
+    document.querySelector('.conversation-main').click();
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/\.netlify\/functions\/conversation\?id=old-chat&_/),
+        expect.any(Object),
+      );
+    });
 
     const textarea = document.querySelector('.composer textarea');
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'hello');
@@ -262,6 +305,10 @@ describe('App shell', () => {
 
     createRoot(document.getElementById('root')).render(<App />);
     await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+    await vi.waitFor(() => {
       expect(document.body.textContent).toContain('old question');
     });
 
@@ -314,8 +361,132 @@ describe('App shell', () => {
         expect.stringMatching(/^\/\.netlify\/functions\/conversations\?_=/),
         expect.any(Object),
       );
-      expect(conversationFetches[0]).toMatch(/^\/\.netlify\/functions\/conversation\?id=old-chat&_=/);
+      expect(conversationFetches).toEqual([]);
     });
+  });
+
+  it('deletes the active conversation without jumping to another conversation', async () => {
+    const conversationFetches = [];
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        conversationFetches.push(String(path));
+        if (options.method === 'DELETE') {
+          return jsonResponse({ ok: true });
+        }
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [{ id: 'a1', role: 'assistant', content: 'old answer', createdAt: '2026-06-12T04:20:00.000Z' }],
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('old answer');
+    });
+
+    document.querySelector('.conversation-actions .icon-button').click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('删除');
+    });
+    [...document.querySelectorAll('.action-menu button')]
+      .find((button) => button.textContent.includes('删除'))
+      .click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('删除这段聊天？');
+    });
+    document.querySelector('.dialog-danger').click();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('新的聊天');
+      expect(document.body.textContent).not.toContain('old answer');
+    });
+    expect(conversationFetches.filter((path) => path.includes('id=old-chat')).length).toBeLessThanOrEqual(2);
+  });
+
+  it('does not jump back when an older streaming request finishes after starting a new chat', async () => {
+    let streamController;
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({ conversation: { ...conversations[0], messages: [] } });
+      }
+      if (path === '/.netlify/functions/chat-stream') {
+        const body = JSON.parse(options.body);
+        const encoder = new TextEncoder();
+        return {
+          ok: true,
+          body: new ReadableStream({
+            start(controller) {
+              streamController = { controller, encoder, body };
+              controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'meta', conversationId: 'stream-chat', title: 'streaming' })}\n`));
+              controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'content', delta: 'partial' })}\n`));
+            },
+          }),
+          json: async () => ({}),
+        };
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('新的聊天');
+    });
+
+    const textarea = document.querySelector('.composer textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'hello');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('.send-button').click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('partial');
+    });
+
+    document.querySelector('.ghost-button').click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('新的聊天');
+      expect(document.body.textContent).not.toContain('partial');
+    });
+
+    streamController.controller.enqueue(streamController.encoder.encode(`${JSON.stringify({
+      type: 'done',
+      conversation: {
+        id: 'stream-chat',
+        title: 'streaming',
+        pinned: false,
+        createdAt: '2026-06-12T04:22:00.000Z',
+        updatedAt: '2026-06-12T04:22:00.000Z',
+        messages: [
+          { id: 'u1', role: 'user', content: streamController.body.message, createdAt: '2026-06-12T04:22:00.000Z' },
+          { id: 'a1', role: 'assistant', content: 'finished', createdAt: '2026-06-12T04:22:01.000Z' },
+        ],
+      },
+      conversations,
+    })}\n`));
+    streamController.controller.close();
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(document.body.textContent).toContain('新的聊天');
+    expect(document.body.textContent).not.toContain('finished');
   });
 
   it('streams reasoning open, then folds it after the final answer and compacts blank lines', async () => {
@@ -361,6 +532,13 @@ describe('App shell', () => {
     createRoot(document.getElementById('root')).render(<App />);
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/\.netlify\/functions\/conversation\?id=old-chat&_/),
+        expect.any(Object),
+      );
     });
 
     const textarea = document.querySelector('.composer textarea');
@@ -409,6 +587,10 @@ describe('App shell', () => {
 
     createRoot(document.getElementById('root')).render(<App />);
     await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+    await vi.waitFor(() => {
       expect(document.querySelector('.code-panel')).toBeTruthy();
     });
 
@@ -416,6 +598,44 @@ describe('App shell', () => {
 
     await vi.waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('console.log("rainbow")');
+    });
+  });
+
+  it('renders LaTeX formulas inside markdown messages', async () => {
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [
+              {
+                id: 'a1',
+                role: 'assistant',
+                content: '\\[\\log_{10}(48^{48}) = 48\\log_{10}(48)\\]',
+                createdAt: '2026-06-12T04:20:00.000Z',
+              },
+            ],
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.katex')).toBeTruthy();
+      expect(document.body.textContent).toContain('log');
     });
   });
 });
