@@ -1,5 +1,5 @@
 {
-  "name": "deepseek-gui",
+  "name": "rainbowseek",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,13 +13,15 @@
   "dependencies": {
     "@netlify/blobs": "^9.1.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "vite": "^7.0.0",
+    "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.468.0"
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "vite": "^7.0.0"
   },
   "devDependencies": {
-    "vitest": "^3.0.0",
-    "jsdom": "^25.0.0"
+    "jsdom": "^25.0.0",
+    "vitest": "^3.0.0"
   }
 }

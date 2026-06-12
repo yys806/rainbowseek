@@ -15,7 +15,9 @@ import {
   X,
 } from 'lucide-react';
 import React from 'react';
+import ReactMarkdown from 'react-markdown';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import remarkGfm from 'remark-gfm';
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -42,6 +44,14 @@ function formatTime(value) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+}
+
+function MarkdownMessage({ content }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+      {content}
+    </ReactMarkdown>
+  );
 }
 
 function LoginScreen({ onLogin }) {
@@ -74,8 +84,8 @@ function LoginScreen({ onLogin }) {
           <Sparkles size={28} />
         </div>
         <p className="eyebrow">For Rainbow Only</p>
-        <h1>粉色 DeepSeek</h1>
-        <p className="login-copy">一个只给你用的轻盈问答空间，聊天记录会在不同设备间同步。</p>
+        <h1>rainbowseek</h1>
+        <p className="login-copy">专门为彩虹开发的 DeepSeek，聊天记录会在不同设备间同步。</p>
         <form className="login-form" onSubmit={submit}>
           <label>
             用户名
@@ -184,7 +194,7 @@ function Sidebar({
           <span className="brand-glyph">
             <Sparkles size={18} />
           </span>
-          <span>Rainbow</span>
+          <span>rainbowseek</span>
         </div>
         <button aria-label="关闭侧栏" className="icon-button mobile-only" onClick={onCloseMobile} type="button">
           <X size={18} />
@@ -254,7 +264,9 @@ function MessageList({ messages, loading }) {
       {messages.map((message) => (
         <article className={`message ${message.role}`} key={message.id ?? `${message.role}-${message.createdAt}`}>
           <div className="message-avatar">{message.role === 'user' ? 'R' : <Sparkles size={16} />}</div>
-          <div className="message-bubble">{message.content}</div>
+          <div className="message-bubble">
+            <MarkdownMessage content={message.content} />
+          </div>
         </article>
       ))}
       {loading && (
@@ -292,7 +304,7 @@ function Composer({ disabled, onSend }) {
             submit(event);
           }
         }}
-        placeholder="发消息给 DeepSeek..."
+        placeholder="发消息给 rainbowseek..."
         rows={1}
         value={value}
       />
@@ -461,7 +473,7 @@ function ChatApp({ session, onLogout }) {
         <MessageList loading={loading} messages={activeMessages} />
         <div className="composer-wrap">
           <Composer disabled={loading} onSend={sendMessage} />
-          <p>内容由 DeepSeek 生成，请重要信息自行核对。</p>
+          <p>支持 Markdown 渲染。内容由 DeepSeek 生成，请重要信息自行核对。</p>
         </div>
       </section>
     </main>

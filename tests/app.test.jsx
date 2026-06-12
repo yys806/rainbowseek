@@ -23,7 +23,8 @@ describe('App shell', () => {
   it('renders the login screen when there is no session', async () => {
     createRoot(document.getElementById('root')).render(<App />);
     await vi.waitFor(() => {
-      expect(document.body.textContent).toContain('粉色 DeepSeek');
+      expect(document.body.textContent).toContain('rainbowseek');
+      expect(document.body.textContent).toContain('专门为彩虹开发的 DeepSeek');
     });
   });
 });
