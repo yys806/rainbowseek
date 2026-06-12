@@ -70,9 +70,31 @@ function MarkdownMessage({ content }) {
       rehypePlugins={[rehypeKatex]}
       remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
     >
-      {normalizeMathDelimiters(content)}
+      {normalizeMarkdownForDisplay(normalizeMathDelimiters(content))}
     </ReactMarkdown>
   );
+}
+
+function normalizeMarkdownForDisplay(value) {
+  const lines = String(value ?? '').replace(/\r\n/g, '\n').split('\n');
+  const normalized = [];
+  let previousWasBlank = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/[ \t]+$/g, '');
+    const isBlank = line.trim() === '';
+    if (isBlank) {
+      if (!previousWasBlank) {
+        normalized.push('');
+      }
+      previousWasBlank = true;
+      continue;
+    }
+    normalized.push(line);
+    previousWasBlank = false;
+  }
+
+  return normalized.join('\n').trim();
 }
 
 function normalizeMathDelimiters(value) {
@@ -129,7 +151,7 @@ function normalizeDisplayText(value) {
     .replace(/\r\n/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n[ \t]+/g, '\n')
-    .replace(/\n{2,}/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 

@@ -621,8 +621,8 @@ describe('App shell', () => {
       expect(document.querySelector('.reasoning-block')?.open).toBe(false);
       expect(document.body.textContent).toContain('first');
       expect(document.body.textContent).toContain('second');
-      expect(document.querySelector('.message.assistant .message-bubble br')).toBeTruthy();
-      expect(document.querySelector('.message.assistant .message-bubble').innerHTML).not.toContain('<br><br>');
+      expect(document.querySelectorAll('.message.assistant .message-bubble > p').length).toBeGreaterThanOrEqual(2);
+      expect(document.querySelector('.message.assistant .message-bubble').innerHTML).not.toContain('<br><br><br>');
     });
   });
 
@@ -709,7 +709,47 @@ describe('App shell', () => {
       const bubble = document.querySelector('.message.assistant .message-bubble');
       expect(document.querySelector('.code-panel')).toBeTruthy();
       expect(document.querySelectorAll('.message.assistant li')).toHaveLength(2);
-      expect(bubble.innerHTML).not.toContain('<br><br>');
+      expect(bubble.innerHTML).not.toContain('<br><br><br>');
+    });
+  });
+
+  it('renders markdown tables as real tables', async () => {
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [
+              {
+                id: 'a1',
+                role: 'assistant',
+                content: '| 维度 | 微观经济学 | 宏观经济学 |\n|---|---|---|\n| 研究对象 | 个体经济单位 | 经济总体 |\n| 目标 | 效率 | 稳定增长 |',
+                createdAt: '2026-06-12T04:20:00.000Z',
+              },
+            ],
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.message.assistant table')).toBeTruthy();
+      expect(document.querySelectorAll('.message.assistant th')).toHaveLength(3);
+      expect(document.querySelectorAll('.message.assistant td')).toHaveLength(6);
+      expect(document.body.textContent).not.toContain('|---|');
     });
   });
 
