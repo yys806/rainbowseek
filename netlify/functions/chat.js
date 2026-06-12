@@ -39,7 +39,7 @@ export async function handler(event, context = {}) {
       })),
     ];
 
-    const assistant = await callDeepSeek(apiMessages, env, { userId: session.username });
+    const assistant = await callDeepSeek(apiMessages, env, { userId: session.username, model: body.model });
     const updated = await service.appendMessages(conversation.id, [assistant]);
 
     return json(200, {

@@ -1,6 +1,12 @@
 import { getEnvValue } from './auth.js';
 
 const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
+const ALLOWED_MODELS = new Set(['deepseek-v4-flash', 'deepseek-v4-pro']);
+
+export function normalizeModel(model, env = process.env) {
+  const candidate = typeof model === 'string' ? model : getEnvValue(env, 'DEEPSEEK_MODEL');
+  return ALLOWED_MODELS.has(candidate) ? candidate : 'deepseek-v4-flash';
+}
 
 export async function callDeepSeek(messages, env = process.env, options = {}) {
   const apiKey = getEnvValue(env, 'DEEPSEEK_API_KEY');
@@ -8,7 +14,7 @@ export async function callDeepSeek(messages, env = process.env, options = {}) {
     throw new Error('DEEPSEEK_API_KEY is not configured');
   }
 
-  const model = getEnvValue(env, 'DEEPSEEK_MODEL') || 'deepseek-v4-flash';
+  const model = normalizeModel(options.model, env);
   const response = await fetch(DEEPSEEK_URL, {
     method: 'POST',
     headers: {
@@ -29,7 +35,8 @@ export async function callDeepSeek(messages, env = process.env, options = {}) {
     throw new Error(detail);
   }
 
-  const content = payload?.choices?.[0]?.message?.content;
+  const message = payload?.choices?.[0]?.message;
+  const content = message?.content;
   if (!content) {
     throw new Error('DeepSeek returned an empty response');
   }
@@ -38,6 +45,7 @@ export async function callDeepSeek(messages, env = process.env, options = {}) {
     role: 'assistant',
     content,
     model,
+    reasoning: message.reasoning_content || message.reasoning || null,
     usage: payload.usage ?? null,
   };
 }

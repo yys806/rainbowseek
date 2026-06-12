@@ -105,4 +105,141 @@ describe('App shell', () => {
       expect(document.body.textContent).toContain('新的聊天');
     });
   });
+
+  it('retries sending as a new chat when the selected conversation is stale', async () => {
+    const chatCalls = [];
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (path === '/.netlify/functions/conversations') {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        if (String(path).includes('new-chat')) {
+          return jsonResponse({
+            conversation: {
+              id: 'new-chat',
+              title: 'hello',
+              pinned: false,
+              createdAt: '2026-06-12T04:22:00.000Z',
+              updatedAt: '2026-06-12T04:22:00.000Z',
+              messages: [
+                { id: 'u1', role: 'user', content: 'hello', createdAt: '2026-06-12T04:22:00.000Z' },
+                { id: 'a1', role: 'assistant', content: 'ok', createdAt: '2026-06-12T04:22:01.000Z' },
+              ],
+            },
+          });
+        }
+        return jsonResponse({ conversation: { ...conversations[0], messages: [] } });
+      }
+      if (path === '/.netlify/functions/chat') {
+        const body = JSON.parse(options.body);
+        chatCalls.push(body);
+        if (body.conversationId) {
+          return jsonResponse({ error: 'Conversation not found' }, false, 404);
+        }
+        return jsonResponse({
+          conversation: {
+            id: 'new-chat',
+            title: 'hello',
+            pinned: false,
+            createdAt: '2026-06-12T04:22:00.000Z',
+            updatedAt: '2026-06-12T04:22:00.000Z',
+            messages: [
+              { id: 'u1', role: 'user', content: body.message, createdAt: '2026-06-12T04:22:00.000Z' },
+              { id: 'a1', role: 'assistant', content: 'ok', createdAt: '2026-06-12T04:22:01.000Z' },
+            ],
+          },
+          conversations: [{ ...conversations[0], id: 'new-chat', title: 'hello' }],
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+
+    const textarea = document.querySelector('.composer textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'hello');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.querySelector('.send-button').disabled).toBe(false);
+    });
+    document.querySelector('.send-button').click();
+
+    await vi.waitFor(() => {
+      expect(chatCalls).toHaveLength(2);
+      expect(chatCalls[0]).toEqual({ conversationId: 'old-chat', message: 'hello', model: 'deepseek-v4-flash' });
+      expect(chatCalls[1]).toEqual({ message: 'hello', model: 'deepseek-v4-flash' });
+      expect(document.body.textContent).toContain('ok');
+      expect(document.body.textContent).not.toContain('这段聊天已经不存在');
+    });
+  });
+
+  it('sends with the selected model and can edit a user message back into the composer', async () => {
+    const chatCalls = [];
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (path === '/.netlify/functions/conversations') {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [{ id: 'u1', role: 'user', content: 'old question', createdAt: '2026-06-12T04:20:00.000Z' }],
+          },
+        });
+      }
+      if (path === '/.netlify/functions/chat') {
+        const body = JSON.parse(options.body);
+        chatCalls.push(body);
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [
+              { id: 'u2', role: 'user', content: body.message, createdAt: '2026-06-12T04:22:00.000Z' },
+              { id: 'a2', role: 'assistant', content: 'pro answer', model: body.model, createdAt: '2026-06-12T04:22:01.000Z' },
+            ],
+          },
+          conversations,
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('old question');
+    });
+
+    [...document.querySelectorAll('.message-action')]
+      .find((button) => button.textContent.includes('编辑'))
+      .click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('.composer textarea').value).toBe('old question');
+    });
+
+    [...document.querySelectorAll('.model-chip')]
+      .find((button) => button.textContent.includes('V4 Pro'))
+      .click();
+    const textarea = document.querySelector('.composer textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'ask with pro');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('.send-button').click();
+
+    await vi.waitFor(() => {
+      expect(chatCalls[0]).toMatchObject({
+        conversationId: 'old-chat',
+        message: 'ask with pro',
+        model: 'deepseek-v4-pro',
+      });
+      expect(document.body.textContent).toContain('pro answer');
+    });
+  });
 });

@@ -135,6 +135,8 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
         id: message.id ?? randomUUID(),
         role: message.role,
         content: message.content,
+        model: message.model ?? null,
+        reasoning: message.reasoning ?? null,
         createdAt: message.createdAt ?? timestamp,
       }));
 

@@ -1,4 +1,6 @@
 import {
+  Clipboard,
+  Check,
   Heart,
   LogOut,
   Menu,
@@ -54,6 +56,26 @@ function MarkdownMessage({ content }) {
       {content}
     </ReactMarkdown>
   );
+}
+
+function modelLabel(model) {
+  return model === 'deepseek-v4-pro' ? 'V4 Pro' : 'V4 Flash';
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
 }
 
 function LoginScreen({ onLogin }) {
@@ -286,11 +308,38 @@ function Sidebar({
   );
 }
 
-function MessageList({ messages, loading }) {
+function MessageActions({ message, onCopy, onEdit }) {
+  return (
+    <div className="message-actions">
+      <button aria-label="复制消息" className="message-action" onClick={() => onCopy(message.content)} type="button">
+        <Clipboard size={14} />
+        复制
+      </button>
+      {message.role === 'user' && (
+        <button aria-label="编辑消息" className="message-action" onClick={() => onEdit(message.content)} type="button">
+          <Pencil size={14} />
+          编辑
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ReasoningBlock({ reasoning }) {
+  if (!reasoning) return null;
+  return (
+    <details className="reasoning-block">
+      <summary>思路摘要</summary>
+      <MarkdownMessage content={reasoning} />
+    </details>
+  );
+}
+
+function MessageList({ messages, loading, onCopy, onEdit }) {
   const bottomRef = useRef(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    bottomRef.current?.scrollIntoView?.({ behavior: 'smooth' });
   }, [messages, loading]);
 
   if (messages.length === 0) {
@@ -310,8 +359,13 @@ function MessageList({ messages, loading }) {
       {messages.map((message) => (
         <article className={`message ${message.role}`} key={message.id ?? `${message.role}-${message.createdAt}`}>
           <div className="message-avatar">{message.role === 'user' ? 'R' : <Sparkles size={16} />}</div>
-          <div className="message-bubble">
-            <MarkdownMessage content={message.content} />
+          <div className="message-content">
+            <div className="message-bubble">
+              {message.model && <div className="message-model">{modelLabel(message.model)}</div>}
+              <ReasoningBlock reasoning={message.reasoning} />
+              <MarkdownMessage content={message.content} />
+            </div>
+            <MessageActions message={message} onCopy={onCopy} onEdit={onEdit} />
           </div>
         </article>
       ))}
@@ -328,36 +382,48 @@ function MessageList({ messages, loading }) {
   );
 }
 
-function Composer({ disabled, onSend }) {
-  const [value, setValue] = useState('');
-
+function Composer({ disabled, model, onModelChange, onSend, value, onChange }) {
   function submit(event) {
     event.preventDefault();
     const message = value.trim();
     if (!message || disabled) return;
-    setValue('');
-    onSend(message);
+    onSend(message, model);
   }
 
   return (
-    <form className="composer" onSubmit={submit}>
-      <textarea
-        disabled={disabled}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            submit(event);
-          }
-        }}
-        placeholder="发消息给 rainbowseek..."
-        rows={1}
-        value={value}
-      />
-      <button aria-label="发送" className="send-button" disabled={disabled || !value.trim()} type="submit">
-        <Send size={18} />
-      </button>
-    </form>
+    <div className="composer-panel">
+      <div className="composer-tools" aria-label="模型选择">
+        {['deepseek-v4-flash', 'deepseek-v4-pro'].map((item) => (
+          <button
+            className={`model-chip ${model === item ? 'active' : ''}`}
+            key={item}
+            onClick={() => onModelChange(item)}
+            type="button"
+          >
+            {model === item && <Check size={14} />}
+            {modelLabel(item)}
+          </button>
+        ))}
+      </div>
+      <form className="composer" onSubmit={submit}>
+        <textarea
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              submit(event);
+            }
+          }}
+          placeholder="发消息给 rainbowseek..."
+          rows={1}
+          value={value}
+        />
+        <button aria-label="发送" className="send-button" disabled={disabled || !value.trim()} type="submit">
+          <Send size={18} />
+        </button>
+      </form>
+    </div>
   );
 }
 
@@ -370,6 +436,9 @@ function ChatApp({ session, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dialog, setDialog] = useState(null);
+  const [composerValue, setComposerValue] = useState('');
+  const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash');
+  const [notice, setNotice] = useState('');
 
   const activeMessages = activeConversation?.messages ?? [];
   const activeTitle = useMemo(() => activeConversation?.title || '新的聊天', [activeConversation]);
@@ -393,10 +462,12 @@ function ChatApp({ session, onLogout }) {
     return nextConversations;
   }
 
-  async function recoverMissingConversation() {
+  async function recoverMissingConversation(options = {}) {
     setActiveId(null);
     setActiveConversation(null);
-    setError('这段聊天已经不存在，已为你切回新的聊天。');
+    if (!options.silent) {
+      setError('这段聊天已经不存在，已为你切回新的聊天。');
+    }
     await refreshConversations(null, { keepNewChat: true });
   }
 
@@ -431,9 +502,22 @@ function ChatApp({ session, onLogout }) {
     setMobileOpen(false);
   }
 
-  async function sendMessage(message) {
+  async function sendChatRequest({ conversationId, message, model }) {
+    const body = { message, model };
+    if (conversationId) {
+      body.conversationId = conversationId;
+    }
+    return api('/.netlify/functions/chat', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function sendMessage(message, model = selectedModel) {
     setLoading(true);
     setError('');
+    setNotice('');
+    setComposerValue('');
     const optimistic = {
       id: `pending-${Date.now()}`,
       role: 'user',
@@ -447,10 +531,17 @@ function ChatApp({ session, onLogout }) {
     }));
 
     try {
-      const payload = await api('/.netlify/functions/chat', {
-        method: 'POST',
-        body: JSON.stringify({ conversationId: targetId, message }),
-      });
+      let payload;
+      try {
+        payload = await sendChatRequest({ conversationId: targetId, message, model });
+      } catch (err) {
+        if (targetId && (err.status === 404 || err.message === 'Conversation not found')) {
+          await recoverMissingConversation({ silent: true });
+          payload = await sendChatRequest({ conversationId: null, message, model });
+        } else {
+          throw err;
+        }
+      }
       setConversations(payload.conversations);
       setActiveId(payload.conversation.id);
       setActiveConversation(payload.conversation);
@@ -463,6 +554,20 @@ function ChatApp({ session, onLogout }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function copyMessage(content) {
+    try {
+      await copyText(content);
+      setNotice('已复制');
+      setTimeout(() => setNotice(''), 1600);
+    } catch {
+      setError('复制失败，请手动选中文字复制。');
+    }
+  }
+
+  function editMessage(content) {
+    setComposerValue(content);
   }
 
   async function confirmRename() {
@@ -584,9 +689,17 @@ function ChatApp({ session, onLogout }) {
             </button>
           </div>
         )}
-        <MessageList loading={loading} messages={activeMessages} />
+        {notice && <div className="toast notice" role="status">{notice}</div>}
+        <MessageList loading={loading} messages={activeMessages} onCopy={copyMessage} onEdit={editMessage} />
         <div className="composer-wrap">
-          <Composer disabled={loading} onSend={sendMessage} />
+          <Composer
+            disabled={loading}
+            model={selectedModel}
+            onChange={setComposerValue}
+            onModelChange={setSelectedModel}
+            onSend={sendMessage}
+            value={composerValue}
+          />
           <p>支持 Markdown 渲染。内容由 DeepSeek 生成，请重要信息自行核对。</p>
         </div>
       </section>
