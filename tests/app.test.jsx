@@ -95,6 +95,33 @@ describe('App shell', () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 
+  it('collapses the desktop sidebar grid column when the sidebar toggle is clicked', async () => {
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({ conversation: { ...conversations[0], messages: [] } });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.querySelector('.chat-shell').classList.contains('sidebar-collapsed')).toBe(false);
+    });
+
+    document.querySelector('.chat-header .desktop-only').click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.chat-shell').classList.contains('sidebar-collapsed')).toBe(true);
+      expect(document.querySelector('.sidebar').classList.contains('collapsed')).toBe(true);
+    });
+  });
+
   it('recovers stale conversation ids without showing the raw not found error', async () => {
     vi.mocked(fetch).mockImplementation(async (path) => {
       if (path === '/.netlify/functions/session') {

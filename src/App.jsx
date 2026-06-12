@@ -858,7 +858,7 @@ function ChatApp({ session, onLogout }) {
   }
 
   return (
-    <main className="chat-shell">
+    <main className={`chat-shell ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
       <Sidebar
         activeId={activeId}
         conversations={conversations}
