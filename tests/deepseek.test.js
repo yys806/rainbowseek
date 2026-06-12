@@ -48,7 +48,7 @@ describe('DeepSeek client', () => {
     });
   });
 
-  it('removes blank lines from non-streamed assistant content', async () => {
+  it('preserves non-streamed assistant markdown spacing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -68,7 +68,7 @@ describe('DeepSeek client', () => {
       { model: 'deepseek-v4-flash' },
     );
 
-    expect(assistant.content).toBe('first paragraph\nsecond paragraph');
+    expect(assistant.content).toBe('first paragraph\n\n\nsecond paragraph');
   });
 
   it('streams content and reasoning deltas from DeepSeek SSE responses', async () => {
@@ -111,7 +111,7 @@ describe('DeepSeek client', () => {
     });
   });
 
-  it('removes blank lines from streamed assistant content', async () => {
+  it('preserves streamed assistant markdown spacing', async () => {
     const encoder = new TextEncoder();
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
@@ -131,6 +131,6 @@ describe('DeepSeek client', () => {
       { model: 'deepseek-v4-flash' },
     );
 
-    expect(assistant.content).toBe('first\nsecond');
+    expect(assistant.content).toBe('first\n\nsecond');
   });
 });

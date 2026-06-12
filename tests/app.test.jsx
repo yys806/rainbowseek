@@ -560,7 +560,7 @@ describe('App shell', () => {
     vi.useRealTimers();
   });
 
-  it('streams reasoning open, then folds it after the final answer and compacts blank lines', async () => {
+  it('streams reasoning open, then folds it after the final answer and caps display blank lines', async () => {
     vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
@@ -621,8 +621,8 @@ describe('App shell', () => {
       expect(document.querySelector('.reasoning-block')?.open).toBe(false);
       expect(document.body.textContent).toContain('first');
       expect(document.body.textContent).toContain('second');
-      expect(document.querySelector('.message.assistant .message-bubble br')).toBeTruthy();
-      expect(document.body.textContent).not.toContain('\n\n\n');
+      expect(document.querySelectorAll('.message.assistant .message-bubble > p').length).toBeGreaterThanOrEqual(2);
+      expect(document.querySelector('.message.assistant .message-bubble').innerHTML).not.toContain('<br><br><br>');
     });
   });
 
@@ -670,6 +670,46 @@ describe('App shell', () => {
 
     await vi.waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('console.log("rainbow")');
+    });
+  });
+
+  it('keeps markdown block boundaries while capping excessive display blank lines', async () => {
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [
+              {
+                id: 'a1',
+                role: 'assistant',
+                content: '下面是代码：\n\n\n\n```python\nprint(\"rainbow\")\n```\n\n\n\n- 第一项\n- 第二项',
+                createdAt: '2026-06-12T04:20:00.000Z',
+              },
+            ],
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+
+    await vi.waitFor(() => {
+      const bubble = document.querySelector('.message.assistant .message-bubble');
+      expect(document.querySelector('.code-panel')).toBeTruthy();
+      expect(document.querySelectorAll('.message.assistant li')).toHaveLength(2);
+      expect(bubble.innerHTML).not.toContain('<br><br><br>');
     });
   });
 

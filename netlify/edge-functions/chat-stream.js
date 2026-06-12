@@ -19,15 +19,6 @@ function streamEvent(type, payload = {}) {
   return `${JSON.stringify({ type, ...payload })}\n`;
 }
 
-function compactBlankLines(value) {
-  return String(value ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n[ \t]+/g, '\n')
-    .replace(/\n+/g, '\n')
-    .trim();
-}
-
 function parseDeepSeekStreamChunk(text) {
   const events = [];
   for (const line of text.split('\n')) {
@@ -134,8 +125,8 @@ export default async function handler(request, context) {
           body: JSON.stringify({
             conversationId: prepared.conversation.id,
             conversation: prepared.conversation,
-            content: compactBlankLines(content),
-            reasoning: compactBlankLines(reasoning),
+            content: content.trim(),
+            reasoning: reasoning.trim(),
             model,
           }),
         }).then(async (response) => {
@@ -166,11 +157,11 @@ export default async function handler(request, context) {
             const reasoningDelta = delta.reasoning_content ?? delta.reasoning ?? '';
             const contentDelta = delta.content ?? '';
             if (reasoningDelta) {
-              reasoning = compactBlankLines(`${reasoning}${reasoningDelta}`);
+              reasoning += reasoningDelta;
               send('reasoning', { delta: reasoningDelta });
             }
             if (contentDelta) {
-              content = compactBlankLines(`${content}${contentDelta}`);
+              content += contentDelta;
               send('content', { delta: contentDelta });
             }
           }
@@ -182,11 +173,11 @@ export default async function handler(request, context) {
           const reasoningDelta = delta.reasoning_content ?? delta.reasoning ?? '';
           const contentDelta = delta.content ?? '';
           if (reasoningDelta) {
-            reasoning = compactBlankLines(`${reasoning}${reasoningDelta}`);
+            reasoning += reasoningDelta;
             send('reasoning', { delta: reasoningDelta });
           }
           if (contentDelta) {
-            content = compactBlankLines(`${content}${contentDelta}`);
+            content += contentDelta;
             send('content', { delta: contentDelta });
           }
         }

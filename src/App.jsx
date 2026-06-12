@@ -124,12 +124,12 @@ function modelLabel(model) {
   return model === 'deepseek-v4-pro' ? 'V4 Pro' : 'V4 Flash';
 }
 
-function compactBlankLines(value) {
+function normalizeDisplayText(value) {
   return String(value ?? '')
     .replace(/\r\n/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n[ \t]+/g, '\n')
-    .replace(/\n+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
@@ -141,8 +141,8 @@ function updateStreamingMessage(conversation, messageId, { contentDelta = '', re
       if (message.id !== messageId) return message;
       return {
         ...message,
-        content: compactBlankLines(`${message.content ?? ''}${contentDelta}`),
-        reasoning: reasoningDelta ? compactBlankLines(`${message.reasoning ?? ''}${reasoningDelta}`) : message.reasoning,
+        content: `${message.content ?? ''}${contentDelta}`,
+        reasoning: reasoningDelta ? `${message.reasoning ?? ''}${reasoningDelta}` : message.reasoning,
         reasoningOpen: reasoningDelta ? true : message.reasoningOpen,
       };
     }),
@@ -479,7 +479,7 @@ function ReasoningBlock({ open, reasoning }) {
   return (
     <details className="reasoning-block" open={open}>
       <summary>{open ? '正在思考' : '思路摘要'}</summary>
-      <MarkdownMessage content={reasoning} />
+      <MarkdownMessage content={normalizeDisplayText(reasoning)} />
     </details>
   );
 }
@@ -512,7 +512,7 @@ function MessageList({ messages, loading, onCopy, onEdit }) {
             <div className="message-bubble">
               {message.model && <div className="message-model">{modelLabel(message.model)}</div>}
               <ReasoningBlock open={Boolean(message.reasoningOpen)} reasoning={message.reasoning} />
-              <MarkdownMessage content={compactBlankLines(message.content)} />
+              <MarkdownMessage content={normalizeDisplayText(message.content)} />
             </div>
             <MessageActions message={message} onCopy={onCopy} onEdit={onEdit} />
           </div>
@@ -787,8 +787,6 @@ function ChatApp({ session, onLogout }) {
                 ...payload.conversation,
                 messages: payload.conversation.messages.map((item) => ({
                   ...item,
-                  content: compactBlankLines(item.content),
-                  reasoning: item.reasoning ? compactBlankLines(item.reasoning) : item.reasoning,
                   reasoningOpen: false,
                 })),
               },
