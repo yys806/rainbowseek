@@ -125,6 +125,7 @@ describe('App shell', () => {
 
   it('retries sending as a new chat when the selected conversation is stale', async () => {
     const chatCalls = [];
+    const conversationLoads = [];
     vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
@@ -133,20 +134,9 @@ describe('App shell', () => {
         return jsonResponse({ conversations });
       }
       if (String(path).startsWith('/.netlify/functions/conversation')) {
+        conversationLoads.push(String(path));
         if (String(path).includes('new-chat')) {
-          return jsonResponse({
-            conversation: {
-              id: 'new-chat',
-              title: 'hello',
-              pinned: false,
-              createdAt: '2026-06-12T04:22:00.000Z',
-              updatedAt: '2026-06-12T04:22:00.000Z',
-              messages: [
-                { id: 'u1', role: 'user', content: 'hello', createdAt: '2026-06-12T04:22:00.000Z' },
-                { id: 'a1', role: 'assistant', content: 'ok', createdAt: '2026-06-12T04:22:01.000Z' },
-              ],
-            },
-          });
+          return jsonResponse({ error: 'Conversation not found' }, false, 404);
         }
         return jsonResponse({ conversation: { ...conversations[0], messages: [] } });
       }
@@ -198,6 +188,7 @@ describe('App shell', () => {
       expect(chatCalls[0]).toEqual({ conversationId: 'old-chat', message: 'hello', model: 'deepseek-v4-flash' });
       expect(chatCalls[1]).toEqual({ message: 'hello', model: 'deepseek-v4-flash' });
       expect(document.body.textContent).toContain('ok');
+      expect(conversationLoads.some((path) => path.includes('new-chat'))).toBe(false);
       expect(document.body.textContent).not.toContain('这段聊天已经不存在');
     });
   });

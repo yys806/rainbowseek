@@ -526,6 +526,7 @@ function ChatApp({ session, onLogout }) {
   const [composerValue, setComposerValue] = useState('');
   const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash');
   const [notice, setNotice] = useState('');
+  const streamingConversationIdRef = useRef(null);
 
   const activeMessages = activeConversation?.messages ?? [];
   const activeTitle = useMemo(() => activeConversation?.title || '新的聊天', [activeConversation]);
@@ -580,6 +581,9 @@ function ChatApp({ session, onLogout }) {
   }, []);
 
   useEffect(() => {
+    if (activeId && streamingConversationIdRef.current === activeId) {
+      return;
+    }
     loadConversation(activeId).catch((err) => setError(err.message));
   }, [activeId]);
 
@@ -634,6 +638,7 @@ function ChatApp({ session, onLogout }) {
       async function readStreamingResponse(response, assistantId) {
         await readStreamingChat(response, {
           meta: ({ conversationId, title }) => {
+            streamingConversationIdRef.current = conversationId;
             setActiveId(conversationId);
             setActiveConversation((current) => ({
               ...(current ?? { id: conversationId, title, messages: [] }),
@@ -649,6 +654,7 @@ function ChatApp({ session, onLogout }) {
           },
           done: (payload) => {
             finalPayload = payload;
+            streamingConversationIdRef.current = null;
           },
           error: ({ error }) => {
             throw new Error(error);
@@ -674,6 +680,7 @@ function ChatApp({ session, onLogout }) {
         }
       }
       if (finalPayload) {
+        streamingConversationIdRef.current = null;
         setConversations(finalPayload.conversations);
         setActiveId(finalPayload.conversation.id);
         setActiveConversation(finalPayload.conversation);
@@ -685,6 +692,7 @@ function ChatApp({ session, onLogout }) {
         setError(err.message);
       }
     } finally {
+      streamingConversationIdRef.current = null;
       setLoading(false);
     }
   }
