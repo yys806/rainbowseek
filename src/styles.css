@@ -639,11 +639,14 @@ textarea:disabled {
   border-radius: 0;
   padding: 0;
   color: rgba(66, 62, 65, 0.56);
+  font-size: 0.88rem;
+  line-height: 1.62;
   background: transparent;
 }
 
 .reasoning-block summary {
   color: rgba(66, 62, 65, 0.56);
+  font-size: 0.86rem;
   font-weight: 700;
   cursor: pointer;
   list-style: none;

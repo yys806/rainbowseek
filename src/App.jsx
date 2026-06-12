@@ -20,6 +20,7 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import rehypeKatex from 'rehype-katex';
+import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
@@ -67,7 +68,7 @@ function MarkdownMessage({ content }) {
     <ReactMarkdown
       components={{ code: CodeBlock, pre: ({ children }) => children }}
       rehypePlugins={[rehypeKatex]}
-      remarkPlugins={[remarkGfm, remarkMath]}
+      remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
     >
       {normalizeMathDelimiters(content)}
     </ReactMarkdown>

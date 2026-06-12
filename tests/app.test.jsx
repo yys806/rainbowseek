@@ -550,6 +550,7 @@ describe('App shell', () => {
       expect(document.querySelector('.reasoning-block')?.open).toBe(false);
       expect(document.body.textContent).toContain('first');
       expect(document.body.textContent).toContain('second');
+      expect(document.querySelector('.message.assistant .message-bubble br')).toBeTruthy();
       expect(document.body.textContent).not.toContain('\n\n\n');
     });
   });
