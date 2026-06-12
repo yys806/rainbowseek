@@ -67,7 +67,7 @@ describe('App shell', () => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
       }
-      if (path === '/.netlify/functions/conversations') {
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
         return jsonResponse({ conversations });
       }
       if (String(path).startsWith('/.netlify/functions/conversation')) {
@@ -100,7 +100,7 @@ describe('App shell', () => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
       }
-      if (path === '/.netlify/functions/conversations') {
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
         return jsonResponse({ conversations });
       }
       if (String(path).startsWith('/.netlify/functions/conversation')) {
@@ -112,7 +112,7 @@ describe('App shell', () => {
     createRoot(document.getElementById('root')).render(<App />);
     await vi.waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(
-        '/.netlify/functions/conversation?id=old-chat',
+        expect.stringMatching(/^\/\.netlify\/functions\/conversation\?id=old-chat&_/),
         expect.any(Object),
       );
     });
@@ -130,7 +130,7 @@ describe('App shell', () => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
       }
-      if (path === '/.netlify/functions/conversations') {
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
         return jsonResponse({ conversations });
       }
       if (String(path).startsWith('/.netlify/functions/conversation')) {
@@ -199,7 +199,7 @@ describe('App shell', () => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
       }
-      if (path === '/.netlify/functions/conversations') {
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
         return jsonResponse({ conversations });
       }
       if (String(path).startsWith('/.netlify/functions/conversation')) {
@@ -238,9 +238,10 @@ describe('App shell', () => {
       expect(document.body.textContent).toContain('old question');
     });
 
-    [...document.querySelectorAll('.message-action')]
-      .find((button) => button.textContent.includes('编辑'))
-      .click();
+    const editButton = document.querySelector('.message-action[aria-label="编辑消息"]');
+    expect(editButton).toBeTruthy();
+    expect(editButton.textContent.trim()).toBe('');
+    editButton.click();
     await vi.waitFor(() => {
       expect(document.querySelector('.composer textarea').value).toBe('old question');
     });
@@ -263,12 +264,39 @@ describe('App shell', () => {
     });
   });
 
+  it('refreshes conversations with cache busting and avoids stale multi-device sync reads', async () => {
+    const conversationFetches = [];
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        conversationFetches.push(String(path));
+        return jsonResponse({ conversation: { ...conversations[0], messages: [] } });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/\.netlify\/functions\/conversations\?_=/),
+        expect.any(Object),
+      );
+      expect(conversationFetches[0]).toMatch(/^\/\.netlify\/functions\/conversation\?id=old-chat&_=/);
+    });
+  });
+
   it('streams reasoning open, then folds it after the final answer and compacts blank lines', async () => {
     vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
       }
-      if (path === '/.netlify/functions/conversations') {
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
         return jsonResponse({ conversations });
       }
       if (String(path).startsWith('/.netlify/functions/conversation')) {
@@ -331,7 +359,7 @@ describe('App shell', () => {
       if (path === '/.netlify/functions/session') {
         return jsonResponse({ username: 'rainbow' });
       }
-      if (path === '/.netlify/functions/conversations') {
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
         return jsonResponse({ conversations });
       }
       if (String(path).startsWith('/.netlify/functions/conversation')) {

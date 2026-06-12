@@ -1,5 +1,4 @@
 import {
-  Clipboard,
   Check,
   Copy,
   Heart,
@@ -25,13 +24,15 @@ import meAvatar from './image/me.jpg';
 import rainbowseekAvatar from './image/rainbowseek.png';
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
+  const { cacheBust = false, ...fetchOptions } = options;
+  const requestPath = cacheBust ? withCacheBust(path) : path;
+  const response = await fetch(requestPath, {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
-      ...(options.headers ?? {}),
+      ...(fetchOptions.headers ?? {}),
     },
-    ...options,
+    ...fetchOptions,
   });
 
   const payload = await response.json().catch(() => ({}));
@@ -41,6 +42,11 @@ async function api(path, options = {}) {
     throw error;
   }
   return payload;
+}
+
+function withCacheBust(path) {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}_=${Date.now()}`;
 }
 
 function formatTime(value) {
@@ -81,9 +87,14 @@ function CodeBlock({ children, className, ...props }) {
     <div className="code-panel">
       <div className="code-panel-header">
         <span>{language || 'code'}</span>
-        <button className="code-copy" onClick={copyCode} type="button">
-          <Copy size={13} />
-          {copied ? '已复制' : '复制'}
+        <button
+          aria-label={copied ? '已复制代码' : '复制代码'}
+          className="code-copy"
+          onClick={copyCode}
+          title={copied ? '已复制代码' : '复制代码'}
+          type="button"
+        >
+          {copied ? <Check size={14} /> : <Copy size={14} />}
         </button>
       </div>
       <pre>
@@ -406,13 +417,11 @@ function MessageActions({ message, onCopy, onEdit }) {
   return (
     <div className="message-actions">
       <button aria-label="复制消息" className="message-action" onClick={() => onCopy(message.content)} type="button">
-        <Clipboard size={14} />
-        复制
+        <Copy size={18} />
       </button>
       {message.role === 'user' && (
         <button aria-label="编辑消息" className="message-action" onClick={() => onEdit(message.content)} type="button">
-          <Pencil size={14} />
-          编辑
+          <Pencil size={17} />
         </button>
       )}
     </div>
@@ -546,7 +555,7 @@ function ChatApp({ session, onLogout }) {
   const activeTitle = useMemo(() => activeConversation?.title || '新的聊天', [activeConversation]);
 
   async function refreshConversations(nextActiveId = activeId, options = {}) {
-    const payload = await api('/.netlify/functions/conversations');
+    const payload = await api('/.netlify/functions/conversations', { cacheBust: true });
     const nextConversations = payload.conversations;
     setConversations(nextConversations);
     if (options.keepNewChat) {
@@ -579,7 +588,7 @@ function ChatApp({ session, onLogout }) {
       return;
     }
     try {
-      const payload = await api(`/.netlify/functions/conversation?id=${encodeURIComponent(id)}`);
+      const payload = await api(`/.netlify/functions/conversation?id=${encodeURIComponent(id)}`, { cacheBust: true });
       setActiveConversation(payload.conversation);
     } catch (err) {
       if (err.status === 404 || err.message === 'Conversation not found') {
@@ -600,6 +609,39 @@ function ChatApp({ session, onLogout }) {
     }
     loadConversation(activeId).catch((err) => setError(err.message));
   }, [activeId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function syncVisibleConversation() {
+      if (cancelled || loading || streamingConversationIdRef.current || document.visibilityState === 'hidden') {
+        return;
+      }
+      try {
+        await refreshConversations(activeId, { keepNewChat: !activeId });
+        if (activeId && !cancelled) {
+          await loadConversation(activeId);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message);
+        }
+      }
+    }
+
+    const interval = window.setInterval(syncVisibleConversation, 3500);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncVisibleConversation();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [activeId, loading]);
 
   async function createConversation() {
     setActiveId(null);

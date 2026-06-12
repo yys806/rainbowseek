@@ -123,6 +123,30 @@ describe('conversation storage', () => {
     expect((await localService.listConversations())[0].id).toBe('edge-chat');
   });
 
+  it('preserves prepared user messages when completion reads a stale conversation body', async () => {
+    const localService = createConversationService(new StaleConversationStore());
+    const updated = await localService.appendMessagesWithMetadata(
+      {
+        id: 'mobile-chat',
+        title: 'Mobile chat',
+        pinned: false,
+        createdAt: '2026-06-12T08:59:00.000Z',
+        updatedAt: '2026-06-12T08:59:00.000Z',
+        messages: [
+          {
+            id: 'user-message',
+            role: 'user',
+            content: 'phone question',
+            createdAt: '2026-06-12T08:59:01.000Z',
+          },
+        ],
+      },
+      [{ id: 'assistant-message', role: 'assistant', content: 'phone answer' }],
+    );
+
+    expect(updated.messages.map((message) => message.content)).toEqual(['phone question', 'phone answer']);
+  });
+
   it('sorts pinned conversations before recently updated conversations', async () => {
     const first = await service.createConversation({ title: 'A' });
     vi.setSystemTime(new Date('2026-06-12T09:01:00.000Z'));

@@ -20,6 +20,32 @@ function sortConversations(conversations) {
   });
 }
 
+function normalizeMessages(messages, timestamp) {
+  return messages.map((message) => ({
+    id: message.id ?? randomUUID(),
+    role: message.role,
+    content: message.content,
+    model: message.model ?? null,
+    reasoning: message.reasoning ?? null,
+    createdAt: message.createdAt ?? timestamp,
+  }));
+}
+
+function mergeMessages(...messageGroups) {
+  const merged = [];
+  const seen = new Set();
+  for (const message of messageGroups.flat()) {
+    if (!message?.role || typeof message.content !== 'string') continue;
+    const key = message.id
+      ? `id:${message.id}`
+      : `body:${message.role}:${message.createdAt ?? ''}:${message.content}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(message);
+  }
+  return merged;
+}
+
 async function readJSON(store, key, fallback) {
   const value = await store.get(key, { type: 'json' });
   return value ?? fallback;
@@ -131,17 +157,10 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
 
       const conversation = await readConversationBody(id);
       const timestamp = nowIso();
-      const normalizedMessages = messages.map((message) => ({
-        id: message.id ?? randomUUID(),
-        role: message.role,
-        content: message.content,
-        model: message.model ?? null,
-        reasoning: message.reasoning ?? null,
-        createdAt: message.createdAt ?? timestamp,
-      }));
+      const normalizedMessages = normalizeMessages(messages, timestamp);
 
       await writeConversationBody(id, {
-        messages: [...(conversation.messages ?? []), ...normalizedMessages],
+        messages: mergeMessages(conversation.messages ?? [], normalizedMessages),
       });
       metadata.updatedAt = timestamp;
       await writeIndex(index);
@@ -164,17 +183,14 @@ export function createConversationService(storeOrEvent = getStore('deepseek-gui'
 
       const conversation = await readConversationBody(metadata.id);
       const timestamp = nowIso();
-      const normalizedMessages = messages.map((message) => ({
-        id: message.id ?? randomUUID(),
-        role: message.role,
-        content: message.content,
-        model: message.model ?? null,
-        reasoning: message.reasoning ?? null,
-        createdAt: message.createdAt ?? timestamp,
-      }));
+      const preparedMessages = normalizeMessages(
+        Array.isArray(metadata.messages) ? metadata.messages : [],
+        timestamp,
+      );
+      const normalizedMessages = normalizeMessages(messages, timestamp);
 
       await writeConversationBody(metadata.id, {
-        messages: [...(conversation.messages ?? []), ...normalizedMessages],
+        messages: mergeMessages(conversation.messages ?? [], preparedMessages, normalizedMessages),
       });
       existing.title = existing.title || metadata.title || '新的聊天';
       existing.pinned = Boolean(existing.pinned);
