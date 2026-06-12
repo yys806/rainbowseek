@@ -21,6 +21,8 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import remarkGfm from 'remark-gfm';
+import meAvatar from './image/me.jpg';
+import rainbowseekAvatar from './image/rainbowseek.png';
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -417,6 +419,15 @@ function MessageActions({ message, onCopy, onEdit }) {
   );
 }
 
+function MessageAvatar({ role }) {
+  const isUser = role === 'user';
+  return (
+    <div className="message-avatar">
+      <img alt={isUser ? '我' : 'rainbowseek'} src={isUser ? meAvatar : rainbowseekAvatar} />
+    </div>
+  );
+}
+
 function ReasoningBlock({ open, reasoning }) {
   if (!reasoning) return null;
   return (
@@ -450,7 +461,7 @@ function MessageList({ messages, loading, onCopy, onEdit }) {
     <div className="messages">
       {messages.map((message) => (
         <article className={`message ${message.role}`} key={message.id ?? `${message.role}-${message.createdAt}`}>
-          <div className="message-avatar">{message.role === 'user' ? 'R' : <Sparkles size={16} />}</div>
+          <MessageAvatar role={message.role} />
           <div className="message-content">
             <div className="message-bubble">
               {message.model && <div className="message-model">{modelLabel(message.model)}</div>}
@@ -463,9 +474,7 @@ function MessageList({ messages, loading, onCopy, onEdit }) {
       ))}
       {loading && !messages.some((message) => message.id?.startsWith?.('streaming-')) && (
         <article className="message assistant">
-          <div className="message-avatar">
-            <Sparkles size={16} />
-          </div>
+          <MessageAvatar role="assistant" />
           <div className="message-bubble typing">正在思考</div>
         </article>
       )}
