@@ -100,10 +100,12 @@ export const handler = stream(async (event, context = {}) => {
     },
   });
 
-  return new Response(readable, {
+  return {
+    statusCode: 200,
     headers: {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Cache-Control': 'no-store, max-age=0',
     },
-  });
+    body: readable,
+  };
 });
