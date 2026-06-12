@@ -5,6 +5,7 @@ export function json(statusCode, body, headers = {}) {
     statusCode,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store, max-age=0',
       ...headers,
     },
     body: JSON.stringify(body),

@@ -1,4 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
+import { json } from '../netlify/lib/http.js';
+
+describe('http helpers', () => {
+  it('marks JSON responses as no-store so chat state is not cached', () => {
+    const response = json(200, { ok: true });
+
+    expect(response.headers['Cache-Control']).toBe('no-store, max-age=0');
+  });
+});
 
 describe('login function', () => {
   it('uses Netlify-provided context.env values when process.env is missing', async () => {
