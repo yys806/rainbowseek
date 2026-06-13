@@ -9,12 +9,15 @@ import {
   MessageCircle,
   MoreVertical,
   PanelLeftClose,
+  Paperclip,
   Pencil,
   Pin,
   PinOff,
   Plus,
+  RefreshCcw,
   Send,
   Sparkles,
+  Square,
   Trash2,
   Wifi,
   X,
@@ -242,6 +245,33 @@ async function filesToImages(files) {
     .filter((file) => file.type?.startsWith('image/'))
     .slice(0, 4);
   return Promise.all(imageFiles.map(fileToImageData));
+}
+
+function readFileAsText(file) {
+  if (typeof file.text === 'function') {
+    return file.text();
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsText(file);
+  });
+}
+
+async function fileToTextAttachment(file) {
+  const content = await readFileAsText(file);
+  return {
+    name: (file.name || 'attachment.txt').slice(0, 120),
+    content: content.slice(0, 12000),
+  };
+}
+
+async function filesToTextAttachments(files) {
+  const textFiles = Array.from(files ?? [])
+    .filter((file) => !file.type?.startsWith('image/'))
+    .slice(0, 4);
+  return Promise.all(textFiles.map(fileToTextAttachment));
 }
 
 async function readStreamingChat(response, handlers) {
@@ -545,6 +575,38 @@ function ReasoningBlock({ open, reasoning }) {
   );
 }
 
+function ImageDescriptionBlock({ description }) {
+  if (!description) return null;
+  return (
+    <details className="context-block">
+      <summary>图片识别结果</summary>
+      <MarkdownMessage content={normalizeDisplayText(description)} />
+    </details>
+  );
+}
+
+function SearchSources({ webSearch }) {
+  const results = Array.isArray(webSearch?.results) ? webSearch.results.filter((item) => item?.url) : [];
+  if (!webSearch?.answer && results.length === 0) return null;
+  return (
+    <details className="context-block source-block">
+      <summary>联网搜索来源</summary>
+      {webSearch?.answer && <p>{webSearch.answer}</p>}
+      {results.length > 0 && (
+        <ol className="source-list">
+          {results.map((result, index) => (
+            <li key={`${result.url}-${index}`}>
+              <a href={result.url} rel="noreferrer" target="_blank">
+                {result.title || result.url}
+              </a>
+            </li>
+          ))}
+        </ol>
+      )}
+    </details>
+  );
+}
+
 function VisualStatus({ status }) {
   if (!status) return null;
   return (
@@ -595,6 +657,8 @@ function MessageList({ messages, loading, onCopy, onEdit, forceScrollSignal = 0 
             <div className="message-bubble">
               {message.model && <div className="message-model">{modelLabel(message.model)}</div>}
               <VisualStatus status={message.visualStatus} />
+              {message.role === 'assistant' && <ImageDescriptionBlock description={message.imageDescription} />}
+              {message.role === 'assistant' && <SearchSources webSearch={message.webSearch} />}
               <ReasoningBlock open={Boolean(message.reasoningOpen)} reasoning={message.reasoning} />
               <MarkdownMessage content={normalizeDisplayText(message.content)} />
             </div>
@@ -614,14 +678,21 @@ function MessageList({ messages, loading, onCopy, onEdit, forceScrollSignal = 0 
 }
 
 function Composer({
+  canRegenerate,
+  canStop,
   disabled,
+  files,
   images,
   model,
+  onFileAdd,
+  onFileRemove,
   onImageAdd,
   onImageRemove,
   onModelChange,
+  onRegenerate,
   onSearchToggle,
   onSend,
+  onStop,
   value,
   onChange,
   onFocus,
@@ -629,18 +700,26 @@ function Composer({
 }) {
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const documentInputRef = useRef(null);
 
   function submit(event) {
     event.preventDefault();
     const message = value.trim();
-    if ((!message && images.length === 0) || disabled) return;
-    onSend(message || '请识别并回答图片内容。', model);
+    if ((!message && images.length === 0 && files.length === 0) || disabled) return;
+    onSend(message || (files.length > 0 ? '请根据上传文件回答。' : '请识别并回答图片内容。'), model);
   }
 
   async function addFiles(files) {
     const nextImages = await filesToImages(files);
     if (nextImages.length > 0) {
       onImageAdd(nextImages);
+    }
+  }
+
+  async function addTextFiles(files) {
+    const nextFiles = await filesToTextAttachments(files);
+    if (nextFiles.length > 0) {
+      onFileAdd(nextFiles);
     }
   }
 
@@ -675,6 +754,18 @@ function Composer({
           <Wifi size={14} />
           搜索
         </button>
+        {canStop && (
+          <button aria-label="停止生成" className="tool-chip danger" onClick={onStop} title="停止生成" type="button">
+            <Square size={13} />
+            停止
+          </button>
+        )}
+        {!canStop && canRegenerate && (
+          <button aria-label="重新生成" className="tool-chip" onClick={onRegenerate} title="重新生成" type="button">
+            <RefreshCcw size={14} />
+            重试
+          </button>
+        )}
       </div>
       {images.length > 0 && (
         <div className="image-preview-list">
@@ -682,6 +773,19 @@ function Composer({
             <div className="image-preview" key={`${image.name}-${index}`}>
               <img alt={image.name || `image-${index + 1}`} src={image.dataUrl} />
               <button aria-label="移除图片" onClick={() => onImageRemove(index)} type="button">
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="file-preview-list">
+          {files.map((file, index) => (
+            <div className="file-preview" key={`${file.name}-${index}`}>
+              <Paperclip size={14} />
+              <span>{file.name}</span>
+              <button aria-label="移除文件" onClick={() => onFileRemove(index)} type="button">
                 <X size={13} />
               </button>
             </div>
@@ -711,6 +815,17 @@ function Composer({
           ref={cameraInputRef}
           type="file"
         />
+        <input
+          accept=".txt,.md,.markdown,.csv,.json,.js,.jsx,.ts,.tsx,.py,.java,.c,.cpp,.html,.css,.xml,.yaml,.yml,text/*,application/json"
+          aria-label="上传文件"
+          multiple
+          onChange={(event) => {
+            addTextFiles(event.target.files).catch(() => {});
+            event.target.value = '';
+          }}
+          ref={documentInputRef}
+          type="file"
+        />
         <button
           aria-label="上传图片"
           className="composer-icon-button"
@@ -729,6 +844,15 @@ function Composer({
         >
           <Camera size={18} />
         </button>
+        <button
+          aria-label="上传文件"
+          className="composer-icon-button"
+          onClick={() => documentInputRef.current?.click()}
+          title="上传文件"
+          type="button"
+        >
+          <Paperclip size={18} />
+        </button>
         <textarea
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}
@@ -745,7 +869,12 @@ function Composer({
           rows={1}
           value={value}
         />
-        <button aria-label="发送" className="send-button" disabled={disabled || (!value.trim() && images.length === 0)} type="submit">
+        <button
+          aria-label="发送"
+          className="send-button"
+          disabled={disabled || (!value.trim() && images.length === 0 && files.length === 0)}
+          type="submit"
+        >
           <Send size={18} />
         </button>
       </form>
@@ -765,10 +894,13 @@ function ChatApp({ session, onLogout }) {
   const [composerValue, setComposerValue] = useState('');
   const [composerFocusScrollSignal, setComposerFocusScrollSignal] = useState(0);
   const [composerImages, setComposerImages] = useState([]);
+  const [composerFiles, setComposerFiles] = useState([]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [selectedModel, setSelectedModel] = useState('deepseek-v4-flash');
   const [notice, setNotice] = useState('');
   const streamingConversationIdRef = useRef(null);
+  const recentlyCompletedConversationIdRef = useRef(null);
+  const abortControllerRef = useRef(null);
   const requestSeqRef = useRef(0);
   const activeIdRef = useRef(null);
   const deletedConversationIdsRef = useRef(new Set());
@@ -838,7 +970,10 @@ function ChatApp({ session, onLogout }) {
   }, []);
 
   useEffect(() => {
-    if (activeId && streamingConversationIdRef.current === activeId) {
+    if (activeId && (streamingConversationIdRef.current === activeId || recentlyCompletedConversationIdRef.current === activeId)) {
+      if (recentlyCompletedConversationIdRef.current === activeId) {
+        recentlyCompletedConversationIdRef.current = null;
+      }
       return;
     }
     loadConversation(activeId).catch((err) => setError(err.message));
@@ -889,6 +1024,8 @@ function ChatApp({ session, onLogout }) {
 
   async function createConversation() {
     requestSeqRef.current += 1;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
     streamingConversationIdRef.current = null;
     setLoading(false);
     updateActiveId(null);
@@ -896,7 +1033,15 @@ function ChatApp({ session, onLogout }) {
     setMobileOpen(false);
   }
 
-  async function sendChatRequest({ conversationId, images = [], message, model, webSearchEnabled: searchEnabled = false }) {
+  async function sendChatRequest({
+    conversationId,
+    files = [],
+    images = [],
+    message,
+    model,
+    signal,
+    webSearchEnabled: searchEnabled = false,
+  }) {
     const body = { message, model, webSearchEnabled: Boolean(searchEnabled) };
     if (conversationId) {
       body.conversationId = conversationId;
@@ -904,12 +1049,16 @@ function ChatApp({ session, onLogout }) {
     if (images.length > 0) {
       body.images = images;
     }
+    if (files.length > 0) {
+      body.files = files;
+    }
     return fetch('/.netlify/functions/chat-stream', {
       credentials: 'include',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      signal,
       body: JSON.stringify(body),
     });
   }
@@ -921,12 +1070,21 @@ function ChatApp({ session, onLogout }) {
     setError('');
     setNotice('');
     setComposerValue('');
+    const abortController = new AbortController();
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = abortController;
     const imagesForRequest = composerImages;
+    const filesForRequest = composerFiles;
     setComposerImages([]);
+    setComposerFiles([]);
+    const attachmentNotes = [
+      imagesForRequest.length > 0 ? `[已上传 ${imagesForRequest.length} 张图片]` : '',
+      filesForRequest.length > 0 ? `[已上传 ${filesForRequest.length} 个文件]` : '',
+    ].filter(Boolean);
     const optimistic = {
       id: `pending-${Date.now()}`,
       role: 'user',
-      content: imagesForRequest.length > 0 ? `${message}\n\n[已上传 ${imagesForRequest.length} 张图片]` : message,
+      content: attachmentNotes.length > 0 ? [message, ...attachmentNotes].filter(Boolean).join('\n') : message,
       createdAt: new Date().toISOString(),
     };
     const streamingAssistant = {
@@ -980,6 +1138,7 @@ function ChatApp({ session, onLogout }) {
                 })),
               },
             };
+            recentlyCompletedConversationIdRef.current = payload.conversation.id;
             streamingConversationIdRef.current = null;
           },
           error: ({ error }) => {
@@ -991,9 +1150,11 @@ function ChatApp({ session, onLogout }) {
       try {
         const response = await sendChatRequest({
           conversationId: targetId,
+          files: filesForRequest,
           images: imagesForRequest,
           message,
           model,
+          signal: abortController.signal,
           webSearchEnabled,
         });
         await readStreamingResponse(response, streamingAssistant.id);
@@ -1008,9 +1169,11 @@ function ChatApp({ session, onLogout }) {
           });
           const response = await sendChatRequest({
             conversationId: null,
+            files: filesForRequest,
             images: imagesForRequest,
             message,
             model,
+            signal: abortController.signal,
             webSearchEnabled,
           });
           await readStreamingResponse(response, streamingAssistant.id);
@@ -1031,6 +1194,11 @@ function ChatApp({ session, onLogout }) {
       }
     } catch (err) {
       if (requestSeqRef.current !== requestSeq) return;
+      if (err.name === 'AbortError') {
+        setNotice('已停止生成');
+        setTimeout(() => setNotice(''), 1600);
+        return;
+      }
       if (err.status === 404 || err.message === 'Conversation not found') {
         await recoverMissingConversation();
       } else {
@@ -1039,8 +1207,33 @@ function ChatApp({ session, onLogout }) {
     } finally {
       if (requestSeqRef.current === requestSeq) {
         streamingConversationIdRef.current = null;
+        if (abortControllerRef.current === abortController) {
+          abortControllerRef.current = null;
+        }
         setLoading(false);
       }
+    }
+  }
+
+  function stopGeneration() {
+    requestSeqRef.current += 1;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    streamingConversationIdRef.current = null;
+    setLoading(false);
+    setNotice('已停止生成');
+    setTimeout(() => setNotice(''), 1600);
+  }
+
+  function regenerateLastAnswer() {
+    if (loading) return;
+    const lastUserMessage = [...activeMessages].reverse().find((message) => message.role === 'user');
+    const content = String(lastUserMessage?.content ?? '')
+      .replace(/\n?\[已上传 \d+ 张图片\]/g, '')
+      .replace(/\n?\[已上传 \d+ 个文件\]/g, '')
+      .trim();
+    if (content) {
+      sendMessage(content, selectedModel);
     }
   }
 
@@ -1190,16 +1383,23 @@ function ChatApp({ session, onLogout }) {
         />
         <div className="composer-wrap">
           <Composer
+            canRegenerate={activeMessages.some((message) => message.role === 'user')}
+            canStop={loading}
             disabled={loading}
+            files={composerFiles}
             images={composerImages}
             model={selectedModel}
             onChange={setComposerValue}
+            onFileAdd={(files) => setComposerFiles((current) => [...current, ...files].slice(0, 4))}
+            onFileRemove={(index) => setComposerFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
             onFocus={() => setComposerFocusScrollSignal((value) => value + 1)}
             onImageAdd={(images) => setComposerImages((current) => [...current, ...images].slice(0, 4))}
             onImageRemove={(index) => setComposerImages((current) => current.filter((_, itemIndex) => itemIndex !== index))}
             onModelChange={setSelectedModel}
+            onRegenerate={regenerateLastAnswer}
             onSearchToggle={setWebSearchEnabled}
             onSend={sendMessage}
+            onStop={stopGeneration}
             value={composerValue}
             webSearchEnabled={webSearchEnabled}
           />

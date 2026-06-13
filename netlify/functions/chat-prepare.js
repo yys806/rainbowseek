@@ -42,6 +42,7 @@ export async function handler(event, context = {}) {
         messages: latest.messages,
       },
       apiMessages: buildApiMessages(latest.messages, {
+        files: body.files,
         imageDescription: body.imageDescription,
         webSearch: body.webSearch,
       }),

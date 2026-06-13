@@ -6,6 +6,8 @@ const ALLOWED_MODELS = new Set(['deepseek-v4-flash', 'deepseek-v4-pro']);
 const VISION_MODEL = 'Qwen/Qwen3-VL-8B-Instruct';
 const MAX_IMAGES = 4;
 const MAX_DATA_URL_LENGTH = 8 * 1024 * 1024;
+const MAX_FILES = 4;
+const MAX_FILE_CONTENT_LENGTH = 12000;
 
 function getCookie(request, name) {
   const header = request.headers.get('cookie') ?? '';
@@ -32,6 +34,17 @@ function normalizeImages(images) {
     .map((image) => ({
       dataUrl: image.dataUrl,
       name: typeof image.name === 'string' ? image.name.slice(0, 120) : 'image',
+    }));
+}
+
+function normalizeFiles(files) {
+  if (!Array.isArray(files)) return [];
+  return files
+    .filter((file) => file && typeof file.name === 'string' && typeof file.content === 'string')
+    .slice(0, MAX_FILES)
+    .map((file) => ({
+      name: file.name.slice(0, 120),
+      content: file.content.slice(0, MAX_FILE_CONTENT_LENGTH),
     }));
 }
 
@@ -187,6 +200,7 @@ export default async function handler(request, context) {
   }
 
   const model = normalizeModel(body.model);
+  const files = normalizeFiles(body.files);
   let imageDescription = null;
   let webSearch = null;
   try {
@@ -204,6 +218,7 @@ export default async function handler(request, context) {
     },
     body: JSON.stringify({
       conversationId: body.conversationId,
+      files,
       message: body.message,
       model,
       imageDescription,
@@ -263,6 +278,8 @@ export default async function handler(request, context) {
             content: cleanAssistantText(content),
             reasoning: cleanAssistantText(reasoning),
             model,
+            imageDescription,
+            webSearch,
           }),
         }).then(async (response) => {
           const payload = await response.json().catch(() => ({}));

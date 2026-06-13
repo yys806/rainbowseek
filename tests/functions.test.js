@@ -106,4 +106,22 @@ describe('chat prompt builder', () => {
     expect(apiMessages[3].content).toContain('联网搜索结果');
     expect(apiMessages[3].content).toContain('https://example.com/a');
   });
+
+  it('adds uploaded text files only to the latest user message', () => {
+    const apiMessages = buildApiMessages(
+      [
+        { role: 'user', content: 'old question' },
+        { role: 'assistant', content: 'old answer' },
+        { role: 'user', content: 'current question' },
+      ],
+      {
+        files: [{ name: 'notes.txt', content: 'important file content' }],
+      },
+    );
+
+    expect(apiMessages[1].content).toBe('old question');
+    expect(apiMessages[3].content).toContain('current question');
+    expect(apiMessages[3].content).toContain('notes.txt');
+    expect(apiMessages[3].content).toContain('important file content');
+  });
 });

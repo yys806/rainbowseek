@@ -1101,4 +1101,209 @@ describe('App shell', () => {
       expect(document.body.textContent).toContain('log');
     });
   });
+
+  it('renders image recognition details and web search sources on assistant messages', async () => {
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [
+              {
+                id: 'a1',
+                role: 'assistant',
+                content: 'answer',
+                imageDescription: 'image detail text',
+                webSearch: {
+                  results: [{ title: 'Source A', url: 'https://example.com/a' }],
+                },
+                createdAt: '2026-06-12T04:20:00.000Z',
+              },
+            ],
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('.context-block')).toBeTruthy();
+      expect(document.body.textContent).toContain('image detail text');
+      expect(document.querySelector('.source-list a').href).toBe('https://example.com/a');
+    });
+  });
+
+  it('sends uploaded text files with the chat request', async () => {
+    const chatBodies = [];
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations: [] });
+      }
+      if (path === '/.netlify/functions/chat-stream') {
+        chatBodies.push(JSON.parse(options.body));
+        return streamResponse([
+          { type: 'meta', conversationId: 'file-chat', title: 'file chat', model: 'deepseek-v4-flash' },
+          { type: 'content', delta: 'ok' },
+          {
+            type: 'done',
+            conversation: {
+              id: 'file-chat',
+              title: 'file chat',
+              pinned: false,
+              createdAt: '2026-06-12T04:22:00.000Z',
+              updatedAt: '2026-06-12T04:22:00.000Z',
+              messages: [
+                { id: 'u1', role: 'user', content: 'read this', createdAt: '2026-06-12T04:22:00.000Z' },
+                { id: 'a1', role: 'assistant', content: 'ok', createdAt: '2026-06-12T04:22:01.000Z' },
+              ],
+            },
+            conversations: [],
+          },
+        ]);
+      }
+      return jsonResponse({});
+    });
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('rainbowseek');
+    });
+
+    const file = new File(['file body'], 'notes.txt', { type: 'text/plain' });
+    const fileInput = document.querySelector('input[aria-label="上传文件"]');
+    Object.defineProperty(fileInput, 'files', { configurable: true, value: [file] });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('notes.txt');
+      expect(document.querySelector('.send-button').disabled).toBe(false);
+    });
+    document.querySelector('.send-button').click();
+
+    await vi.waitFor(() => {
+      expect(chatBodies).toHaveLength(1);
+      expect(chatBodies[0].files).toEqual([{ name: 'notes.txt', content: 'file body' }]);
+    });
+    root.unmount();
+  });
+
+  it('aborts an in-flight chat request when stop generation is clicked', async () => {
+    let chatSignal;
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations: [] });
+      }
+      if (path === '/.netlify/functions/chat-stream') {
+        chatSignal = options.signal;
+        return {
+          ok: true,
+          body: new ReadableStream({ start() {} }),
+        };
+      }
+      return jsonResponse({});
+    });
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('rainbowseek');
+    });
+
+    const textarea = document.querySelector('.composer textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'stop me');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('.send-button').click();
+
+    await vi.waitFor(() => {
+      expect(chatSignal).toBeTruthy();
+      expect(document.querySelector('button[aria-label="停止生成"]')).toBeTruthy();
+    });
+    document.querySelector('button[aria-label="停止生成"]').click();
+
+    await vi.waitFor(() => {
+      expect(chatSignal.aborted).toBe(true);
+    });
+    root.unmount();
+  });
+
+  it('regenerates from the latest user message', async () => {
+    const chatBodies = [];
+    vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [
+              { id: 'u1', role: 'user', content: 'latest question', createdAt: '2026-06-12T04:20:00.000Z' },
+              { id: 'a1', role: 'assistant', content: 'old answer', createdAt: '2026-06-12T04:20:01.000Z' },
+            ],
+          },
+        });
+      }
+      if (path === '/.netlify/functions/chat-stream') {
+        chatBodies.push(JSON.parse(options.body));
+        return streamResponse([
+          { type: 'meta', conversationId: 'old-chat', title: 'Reply in markdown ...', model: 'deepseek-v4-flash' },
+          { type: 'content', delta: 'new answer' },
+          {
+            type: 'done',
+            conversation: {
+              id: 'old-chat',
+              title: 'Reply in markdown ...',
+              pinned: false,
+              createdAt: '2026-06-12T04:20:00.000Z',
+              updatedAt: '2026-06-12T04:22:00.000Z',
+              messages: [
+                { id: 'u1', role: 'user', content: 'latest question', createdAt: '2026-06-12T04:20:00.000Z' },
+                { id: 'a1', role: 'assistant', content: 'new answer', createdAt: '2026-06-12T04:20:01.000Z' },
+              ],
+            },
+            conversations: [],
+          },
+        ]);
+      }
+      return jsonResponse({});
+    });
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('old answer');
+    });
+    document.querySelector('button[aria-label="重新生成"]').click();
+
+    await vi.waitFor(() => {
+      expect(chatBodies[0].message).toBe('latest question');
+    });
+    root.unmount();
+  });
 });

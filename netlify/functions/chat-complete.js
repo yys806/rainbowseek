@@ -27,6 +27,8 @@ export async function handler(event, context = {}) {
       content: body.content,
       reasoning: body.reasoning || null,
       model: body.model,
+      imageDescription: body.imageDescription || null,
+      webSearch: body.webSearch || null,
       usage: null,
     };
     const updated = body.conversation

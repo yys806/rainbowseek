@@ -20,6 +20,19 @@ function formatWebSearch(webSearch) {
   return lines.join('\n');
 }
 
+function formatUploadedFiles(files) {
+  if (!Array.isArray(files) || files.length === 0) return '';
+  const lines = files
+    .filter((file) => file && typeof file.name === 'string' && typeof file.content === 'string')
+    .slice(0, 4)
+    .map((file, index) => [
+      `文件 ${index + 1}：${file.name}`,
+      file.content,
+    ].join('\n'))
+    .filter(Boolean);
+  return lines.length > 0 ? ['上传文件内容：', ...lines].join('\n') : '';
+}
+
 function buildLatestUserContent(content, options = {}) {
   const sections = [
     'Current user message to answer, and the only question you should answer now:',
@@ -33,6 +46,11 @@ function buildLatestUserContent(content, options = {}) {
   const webSearch = formatWebSearch(options.webSearch);
   if (webSearch) {
     sections.push(webSearch);
+  }
+
+  const uploadedFiles = formatUploadedFiles(options.files);
+  if (uploadedFiles) {
+    sections.push(uploadedFiles);
   }
 
   return sections.join('\n\n');

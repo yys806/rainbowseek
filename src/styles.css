@@ -699,6 +699,41 @@ textarea:disabled {
   vertical-align: -0.08em;
 }
 
+.context-block {
+  margin: 0 0 10px;
+  border: 1px solid rgba(138, 70, 112, 0.12);
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: rgba(66, 62, 65, 0.68);
+  font-size: 0.88rem;
+  line-height: 1.58;
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.context-block summary {
+  color: var(--rose-deep);
+  font-weight: 900;
+  cursor: pointer;
+  list-style: none;
+}
+
+.context-block summary::-webkit-details-marker {
+  display: none;
+}
+
+.source-list {
+  margin: 6px 0 0;
+}
+
+.source-list a {
+  color: #347866;
+  text-decoration: none;
+}
+
+.source-list a:hover {
+  text-decoration: underline;
+}
+
 .message-bubble > *:first-child {
   margin-top: 0;
 }
@@ -905,10 +940,55 @@ textarea:disabled {
   background: rgba(244, 255, 251, 0.92);
 }
 
+.tool-chip.danger {
+  border-color: rgba(186, 30, 84, 0.22);
+  color: #ba1e54;
+  background: rgba(255, 246, 250, 0.92);
+}
+
 .image-preview-list {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.file-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-preview {
+  min-height: 34px;
+  max-width: 260px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 900;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.file-preview span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-preview button {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: rgba(60, 35, 50, 0.58);
 }
 
 .image-preview {
@@ -947,7 +1027,7 @@ textarea:disabled {
   width: min(860px, 100%);
   margin: 0;
   display: grid;
-  grid-template-columns: 40px 40px minmax(0, 1fr) 46px;
+  grid-template-columns: 40px 40px 40px minmax(0, 1fr) 46px;
   gap: 10px;
   padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.8);
@@ -1301,7 +1381,7 @@ textarea:disabled {
   }
 
   .composer {
-    grid-template-columns: 38px 38px minmax(0, 1fr) 42px;
+    grid-template-columns: 38px 38px 38px minmax(0, 1fr) 42px;
     gap: 8px;
     padding: 8px;
     border-radius: 18px;

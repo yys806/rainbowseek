@@ -27,6 +27,8 @@ function normalizeMessages(messages, timestamp) {
     content: message.content,
     model: message.model ?? null,
     reasoning: message.reasoning ?? null,
+    imageDescription: message.imageDescription ?? null,
+    webSearch: message.webSearch ?? null,
     createdAt: message.createdAt ?? timestamp,
   }));
 }
