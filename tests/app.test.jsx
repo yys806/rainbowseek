@@ -1035,6 +1035,56 @@ describe('App shell', () => {
     }
   });
 
+  it('keeps enough bottom space for the measured fixed mobile composer when the keyboard overlays the viewport', async () => {
+    const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    const viewport = new EventTarget();
+    viewport.height = 520;
+    viewport.offsetTop = 0;
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 780 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      if (this.classList?.contains('composer-wrap')) {
+        return { width: 390, height: 148, top: 0, right: 390, bottom: 148, left: 0, x: 0, y: 0, toJSON: () => {} };
+      }
+      return originalGetBoundingClientRect.call(this);
+    };
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    });
+
+    const root = createRoot(document.getElementById('root'));
+    try {
+      root.render(<App />);
+      await vi.waitFor(() => {
+        expect(document.documentElement.style.getPropertyValue('--composer-keyboard-offset')).toBe('260px');
+        expect(document.documentElement.style.getPropertyValue('--composer-height')).toBe('148px');
+        expect(document.documentElement.style.getPropertyValue('--composer-safe-space')).toBe('408px');
+      });
+    } finally {
+      root.unmount();
+      HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      if (originalVisualViewport) {
+        Object.defineProperty(window, 'visualViewport', originalVisualViewport);
+      } else {
+        delete window.visualViewport;
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      document.documentElement.style.removeProperty('--composer-height');
+      document.documentElement.style.removeProperty('--composer-keyboard-offset');
+      document.documentElement.style.removeProperty('--composer-safe-space');
+    }
+  });
+
   it('sends selected images and the web search setting with chat requests', async () => {
     const chatBodies = [];
     vi.mocked(fetch).mockImplementation(async (path, options = {}) => {

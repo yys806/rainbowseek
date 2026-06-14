@@ -12,6 +12,9 @@
   --shadow: 0 24px 70px rgba(198, 55, 118, 0.16);
   --app-viewport-height: 100dvh;
   --keyboard-inset: 0px;
+  --composer-height: 120px;
+  --composer-keyboard-offset: 0px;
+  --composer-safe-space: 0px;
   color: var(--ink);
   background: #fff6fb;
   font-family: "Times New Roman", "方正小标宋简体", "FZXiaoBiaoSong-B05S", "Microsoft YaHei UI", serif;
@@ -1278,11 +1281,17 @@ textarea:disabled {
   }
 
   .messages {
-    padding: 8px 14px 18px;
+    padding: 8px 14px calc(18px + var(--composer-safe-space));
   }
 
   .composer-wrap {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: var(--composer-keyboard-offset);
+    z-index: 12;
     padding: 10px 12px max(14px, env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(255, 246, 251, 0), rgba(255, 246, 251, 0.96) 22%, rgba(255, 246, 251, 0.99));
   }
 
   .toast {

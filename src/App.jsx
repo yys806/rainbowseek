@@ -274,7 +274,14 @@ async function filesToTextAttachments(files) {
   return Promise.all(textFiles.map(fileToTextAttachment));
 }
 
-function useVisualViewportVariables() {
+function readComposerHeight(composerRef) {
+  const element = composerRef?.current;
+  if (!element) return 120;
+  const rectHeight = Math.ceil(element.getBoundingClientRect?.().height || 0);
+  return rectHeight || element.offsetHeight || 120;
+}
+
+function useVisualViewportVariables(composerRef, measureKey = '') {
   const [viewportSignal, setViewportSignal] = useState(0);
 
   useEffect(() => {
@@ -290,10 +297,15 @@ function useVisualViewportVariables() {
       const layoutHeight = Math.round(window.innerHeight || visualHeight);
       const offsetTop = Math.round(viewport?.offsetTop || 0);
       const keyboardInset = Math.max(0, layoutHeight - visualHeight - offsetTop);
+      const composerHeight = readComposerHeight(composerRef);
+      const composerSafeSpace = keyboardInset + composerHeight;
       if (visualHeight > 0) {
         root.style.setProperty('--app-viewport-height', `${visualHeight}px`);
       }
       root.style.setProperty('--keyboard-inset', `${keyboardInset}px`);
+      root.style.setProperty('--composer-height', `${composerHeight}px`);
+      root.style.setProperty('--composer-keyboard-offset', `${keyboardInset}px`);
+      root.style.setProperty('--composer-safe-space', `${composerSafeSpace}px`);
       if (shouldNotify) {
         setViewportSignal((value) => value + 1);
       }
@@ -305,16 +317,25 @@ function useVisualViewportVariables() {
     viewport?.addEventListener('scroll', handleViewportChange);
     window.addEventListener('resize', handleViewportChange);
     window.addEventListener('orientationchange', handleViewportChange);
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' && composerRef?.current ? new ResizeObserver(() => updateViewportVariables()) : null;
+    if (resizeObserver && composerRef.current) {
+      resizeObserver.observe(composerRef.current);
+    }
 
     return () => {
       viewport?.removeEventListener('resize', handleViewportChange);
       viewport?.removeEventListener('scroll', handleViewportChange);
       window.removeEventListener('resize', handleViewportChange);
       window.removeEventListener('orientationchange', handleViewportChange);
+      resizeObserver?.disconnect();
       root.style.removeProperty('--app-viewport-height');
       root.style.removeProperty('--keyboard-inset');
+      root.style.removeProperty('--composer-height');
+      root.style.removeProperty('--composer-keyboard-offset');
+      root.style.removeProperty('--composer-safe-space');
     };
-  }, []);
+  }, [composerRef, measureKey]);
 
   return viewportSignal;
 }
@@ -697,7 +718,7 @@ function MessageList({ keyboardScrollSignal = 0, messages, loading, onCopy, onEd
       keyboardScrollUntilRef.current = Date.now() + 900;
     }
     if (shouldStickToBottomRef.current || hasNewForceScroll) {
-      scrollToBottom();
+      scrollToBottom(hasNewForceScroll ? 'auto' : 'smooth');
       shouldStickToBottomRef.current = true;
     }
   }, [messages, loading, forceScrollSignal]);
@@ -955,8 +976,6 @@ function Composer({
 }
 
 function ChatApp({ session, onLogout }) {
-  const viewportSignal = useVisualViewportVariables();
-
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [conversations, setConversations] = useState([]);
@@ -978,6 +997,9 @@ function ChatApp({ session, onLogout }) {
   const requestSeqRef = useRef(0);
   const activeIdRef = useRef(null);
   const deletedConversationIdsRef = useRef(new Set());
+  const composerWrapRef = useRef(null);
+  const composerMeasureKey = `${composerImages.length}:${composerFiles.length}:${loading ? 'loading' : 'idle'}`;
+  const viewportSignal = useVisualViewportVariables(composerWrapRef, composerMeasureKey);
 
   const activeMessages = activeConversation?.messages ?? [];
   const activeTitle = useMemo(() => activeConversation?.title || '新的聊天', [activeConversation]);
@@ -1456,7 +1478,7 @@ function ChatApp({ session, onLogout }) {
           onCopy={copyMessage}
           onEdit={editMessage}
         />
-        <div className="composer-wrap">
+        <div className="composer-wrap" ref={composerWrapRef}>
           <Composer
             canRegenerate={activeMessages.some((message) => message.role === 'user')}
             canStop={loading}
