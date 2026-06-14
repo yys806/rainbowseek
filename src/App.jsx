@@ -274,6 +274,43 @@ async function filesToTextAttachments(files) {
   return Promise.all(textFiles.map(fileToTextAttachment));
 }
 
+function useVisualViewportVariables() {
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const viewport = window.visualViewport;
+    const root = document.documentElement;
+
+    function updateViewportVariables() {
+      const visualHeight = Math.round(viewport?.height || window.innerHeight || root.clientHeight || 0);
+      const layoutHeight = Math.round(window.innerHeight || visualHeight);
+      const offsetTop = Math.round(viewport?.offsetTop || 0);
+      const keyboardInset = Math.max(0, layoutHeight - visualHeight - offsetTop);
+      if (visualHeight > 0) {
+        root.style.setProperty('--app-viewport-height', `${visualHeight}px`);
+      }
+      root.style.setProperty('--keyboard-inset', `${keyboardInset}px`);
+    }
+
+    updateViewportVariables();
+    viewport?.addEventListener('resize', updateViewportVariables);
+    viewport?.addEventListener('scroll', updateViewportVariables);
+    window.addEventListener('resize', updateViewportVariables);
+    window.addEventListener('orientationchange', updateViewportVariables);
+
+    return () => {
+      viewport?.removeEventListener('resize', updateViewportVariables);
+      viewport?.removeEventListener('scroll', updateViewportVariables);
+      window.removeEventListener('resize', updateViewportVariables);
+      window.removeEventListener('orientationchange', updateViewportVariables);
+      root.style.removeProperty('--app-viewport-height');
+      root.style.removeProperty('--keyboard-inset');
+    };
+  }, []);
+}
+
 async function readStreamingChat(response, handlers) {
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
@@ -883,6 +920,8 @@ function Composer({
 }
 
 function ChatApp({ session, onLogout }) {
+  useVisualViewportVariables();
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [conversations, setConversations] = useState([]);

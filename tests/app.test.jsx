@@ -860,6 +860,54 @@ describe('App shell', () => {
     });
   });
 
+  it('tracks the visual viewport height so the mobile composer stays above the keyboard', async () => {
+    const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    const viewport = new EventTarget();
+    viewport.height = 520;
+    viewport.offsetTop = 0;
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 780 });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations: [] });
+      }
+      return jsonResponse({});
+    });
+
+    const root = createRoot(document.getElementById('root'));
+    try {
+      root.render(<App />);
+      await vi.waitFor(() => {
+        expect(document.documentElement.style.getPropertyValue('--app-viewport-height')).toBe('520px');
+        expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('260px');
+      });
+
+      viewport.height = 430;
+      viewport.dispatchEvent(new Event('resize'));
+
+      await vi.waitFor(() => {
+        expect(document.documentElement.style.getPropertyValue('--app-viewport-height')).toBe('430px');
+        expect(document.documentElement.style.getPropertyValue('--keyboard-inset')).toBe('350px');
+      });
+    } finally {
+      root.unmount();
+      if (originalVisualViewport) {
+        Object.defineProperty(window, 'visualViewport', originalVisualViewport);
+      } else {
+        delete window.visualViewport;
+      }
+      if (originalInnerHeight) {
+        Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+      }
+      document.documentElement.style.removeProperty('--app-viewport-height');
+      document.documentElement.style.removeProperty('--keyboard-inset');
+    }
+  });
+
   it('sends selected images and the web search setting with chat requests', async () => {
     const chatBodies = [];
     vi.mocked(fetch).mockImplementation(async (path, options = {}) => {
