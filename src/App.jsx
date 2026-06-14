@@ -275,6 +275,8 @@ async function filesToTextAttachments(files) {
 }
 
 function useVisualViewportVariables() {
+  const [viewportSignal, setViewportSignal] = useState(0);
+
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') {
       return undefined;
@@ -283,7 +285,7 @@ function useVisualViewportVariables() {
     const viewport = window.visualViewport;
     const root = document.documentElement;
 
-    function updateViewportVariables() {
+    function updateViewportVariables(shouldNotify = false) {
       const visualHeight = Math.round(viewport?.height || window.innerHeight || root.clientHeight || 0);
       const layoutHeight = Math.round(window.innerHeight || visualHeight);
       const offsetTop = Math.round(viewport?.offsetTop || 0);
@@ -292,23 +294,29 @@ function useVisualViewportVariables() {
         root.style.setProperty('--app-viewport-height', `${visualHeight}px`);
       }
       root.style.setProperty('--keyboard-inset', `${keyboardInset}px`);
+      if (shouldNotify) {
+        setViewportSignal((value) => value + 1);
+      }
     }
 
     updateViewportVariables();
-    viewport?.addEventListener('resize', updateViewportVariables);
-    viewport?.addEventListener('scroll', updateViewportVariables);
-    window.addEventListener('resize', updateViewportVariables);
-    window.addEventListener('orientationchange', updateViewportVariables);
+    const handleViewportChange = () => updateViewportVariables(true);
+    viewport?.addEventListener('resize', handleViewportChange);
+    viewport?.addEventListener('scroll', handleViewportChange);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('orientationchange', handleViewportChange);
 
     return () => {
-      viewport?.removeEventListener('resize', updateViewportVariables);
-      viewport?.removeEventListener('scroll', updateViewportVariables);
-      window.removeEventListener('resize', updateViewportVariables);
-      window.removeEventListener('orientationchange', updateViewportVariables);
+      viewport?.removeEventListener('resize', handleViewportChange);
+      viewport?.removeEventListener('scroll', handleViewportChange);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('orientationchange', handleViewportChange);
       root.style.removeProperty('--app-viewport-height');
       root.style.removeProperty('--keyboard-inset');
     };
   }, []);
+
+  return viewportSignal;
 }
 
 async function readStreamingChat(response, handlers) {
@@ -654,24 +662,51 @@ function VisualStatus({ status }) {
   );
 }
 
-function MessageList({ messages, loading, onCopy, onEdit, forceScrollSignal = 0 }) {
+function MessageList({ keyboardScrollSignal = 0, messages, loading, onCopy, onEdit, forceScrollSignal = 0 }) {
   const messagesRef = useRef(null);
   const bottomRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
+  const consumedForceScrollSignalRef = useRef(0);
+  const keyboardScrollUntilRef = useRef(0);
 
   function updateStickToBottom() {
     const element = messagesRef.current;
     if (!element) return;
     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
     shouldStickToBottomRef.current = distanceFromBottom < 80;
+    if (!shouldStickToBottomRef.current) {
+      keyboardScrollUntilRef.current = 0;
+    }
+  }
+
+  function scrollToBottom(behavior = 'smooth') {
+    bottomRef.current?.scrollIntoView?.({ behavior });
   }
 
   useEffect(() => {
-    if (shouldStickToBottomRef.current || forceScrollSignal > 0) {
-      bottomRef.current?.scrollIntoView?.({ behavior: 'smooth' });
+    const element = messagesRef.current;
+    if (!element) return undefined;
+    element.addEventListener('scroll', updateStickToBottom, { passive: true });
+    return () => element.removeEventListener('scroll', updateStickToBottom);
+  }, []);
+
+  useEffect(() => {
+    const hasNewForceScroll = forceScrollSignal > consumedForceScrollSignalRef.current;
+    if (hasNewForceScroll) {
+      consumedForceScrollSignalRef.current = forceScrollSignal;
+      keyboardScrollUntilRef.current = Date.now() + 900;
+    }
+    if (shouldStickToBottomRef.current || hasNewForceScroll) {
+      scrollToBottom();
       shouldStickToBottomRef.current = true;
     }
   }, [messages, loading, forceScrollSignal]);
+
+  useEffect(() => {
+    if (keyboardScrollSignal > 0 && keyboardScrollUntilRef.current > Date.now()) {
+      scrollToBottom('auto');
+    }
+  }, [keyboardScrollSignal]);
 
   if (messages.length === 0) {
     return (
@@ -920,7 +955,7 @@ function Composer({
 }
 
 function ChatApp({ session, onLogout }) {
-  useVisualViewportVariables();
+  const viewportSignal = useVisualViewportVariables();
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -1415,6 +1450,7 @@ function ChatApp({ session, onLogout }) {
         {notice && <div className="toast notice" role="status">{notice}</div>}
         <MessageList
           forceScrollSignal={composerFocusScrollSignal}
+          keyboardScrollSignal={viewportSignal}
           loading={loading}
           messages={activeMessages}
           onCopy={copyMessage}

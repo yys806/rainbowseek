@@ -49,6 +49,7 @@ describe('App shell', () => {
   });
 
   afterEach(() => {
+    delete Element.prototype.scrollIntoView;
     vi.unstubAllGlobals();
   });
 
@@ -858,6 +859,132 @@ describe('App shell', () => {
     await vi.waitFor(() => {
       expect(scrollIntoView).toHaveBeenCalled();
     });
+  });
+
+  it('does not reuse an old composer focus scroll after the user scrolls upward', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = function scrollCurrentElementIntoView(options) {
+      if (document.body.contains(this)) {
+        scrollIntoView(options);
+      }
+    };
+    let latestMessages = Array.from({ length: 20 }, (_, index) => ({
+      id: `a${index}`,
+      role: 'assistant',
+      content: `answer ${index}`,
+      createdAt: '2026-06-12T04:20:00.000Z',
+    }));
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            updatedAt: `2026-06-12T04:${latestMessages.length}:00.000Z`,
+            messages: latestMessages,
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    createRoot(document.getElementById('root')).render(<App />);
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('Reply in markdown ...');
+    });
+    document.querySelector('.conversation-main').click();
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('answer 19');
+    });
+
+    const messages = document.querySelector('.messages');
+    Object.defineProperty(messages, 'scrollHeight', { configurable: true, value: 2000 });
+    Object.defineProperty(messages, 'clientHeight', { configurable: true, value: 400 });
+    Object.defineProperty(messages, 'scrollTop', { configurable: true, value: 200, writable: true });
+    document.querySelector('.composer textarea').click();
+    await vi.waitFor(() => {
+      expect(scrollIntoView).toHaveBeenCalled();
+    });
+
+    scrollIntoView.mockClear();
+    messages.dispatchEvent(new Event('scroll', { bubbles: true }));
+    latestMessages = [
+      ...latestMessages,
+      { id: 'a20', role: 'assistant', content: 'answer 20', createdAt: '2026-06-12T04:21:00.000Z' },
+    ];
+    await new Promise((resolve) => setTimeout(resolve, 3700));
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('answer 20');
+    });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('scrolls again when the keyboard changes the visual viewport after composer focus', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = function scrollCurrentElementIntoView(options) {
+      if (document.body.contains(this)) {
+        scrollIntoView(options);
+      }
+    };
+    const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const viewport = new EventTarget();
+    viewport.height = 520;
+    viewport.offsetTop = 0;
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    vi.mocked(fetch).mockImplementation(async (path) => {
+      if (path === '/.netlify/functions/session') {
+        return jsonResponse({ username: 'rainbow' });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversations')) {
+        return jsonResponse({ conversations });
+      }
+      if (String(path).startsWith('/.netlify/functions/conversation')) {
+        return jsonResponse({
+          conversation: {
+            ...conversations[0],
+            messages: [{ id: 'a1', role: 'assistant', content: 'answer', createdAt: '2026-06-12T04:20:00.000Z' }],
+          },
+        });
+      }
+      return jsonResponse({});
+    });
+
+    const root = createRoot(document.getElementById('root'));
+    try {
+      root.render(<App />);
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain('Reply in markdown ...');
+      });
+      document.querySelector('.conversation-main').click();
+      await vi.waitFor(() => {
+        expect(document.body.textContent).toContain('answer');
+      });
+      scrollIntoView.mockClear();
+
+      document.querySelector('.composer textarea').click();
+      await vi.waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      });
+      scrollIntoView.mockClear();
+      viewport.dispatchEvent(new Event('resize'));
+
+      await vi.waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalled();
+      });
+    } finally {
+      root.unmount();
+      if (originalVisualViewport) {
+        Object.defineProperty(window, 'visualViewport', originalVisualViewport);
+      } else {
+        delete window.visualViewport;
+      }
+    }
   });
 
   it('tracks the visual viewport height so the mobile composer stays above the keyboard', async () => {
