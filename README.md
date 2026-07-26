@@ -24,10 +24,15 @@ netlify dev
 ```env
 DEEPSEEK_API_KEY=sk-...
 DEEPSEEK_MODEL=deepseek-v4-flash
+SILICONFLOW_API_KEY=sk-...
+TAVILY_API_KEY=tvly-...
 APP_USERNAME=rainbow
 APP_PASSWORD=your-password
 SESSION_SECRET=use-a-long-random-secret
 ```
+
+- `SILICONFLOW_API_KEY`:图片识别用(SiliconFlow 上的 Qwen 视觉模型)
+- `TAVILY_API_KEY`:联网搜索用(Tavily Search API)
 
 ## 验证
 
@@ -54,6 +59,8 @@ Functions directory: `netlify/functions`
 
 - `DEEPSEEK_API_KEY`
 - `DEEPSEEK_MODEL`
+- `SILICONFLOW_API_KEY`(图片识别)
+- `TAVILY_API_KEY`(联网搜索)
 - `APP_USERNAME`
 - `APP_PASSWORD`
 - `SESSION_SECRET`
