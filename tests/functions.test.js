@@ -21,12 +21,12 @@ describe('login function', () => {
       {
         httpMethod: 'POST',
         headers: { 'x-forwarded-proto': 'https' },
-        body: JSON.stringify({ username: 'rainbow', password: '050428' }),
+        body: JSON.stringify({ username: 'rainbow', password: 'test-password' }),
       },
       {
         env: {
           APP_USERNAME: 'rainbow',
-          APP_PASSWORD: '050428',
+          APP_PASSWORD: 'test-password',
           SESSION_SECRET: 'test-secret-with-enough-length',
         },
       },
@@ -42,7 +42,7 @@ describe('login function', () => {
     const { handler } = await import('../netlify/functions/login.js');
     const values = new Map([
       ['APP_USERNAME', 'rainbow'],
-      ['APP_PASSWORD', '050428'],
+      ['APP_PASSWORD', 'test-password'],
       ['SESSION_SECRET', 'test-secret-with-enough-length'],
     ]);
 
@@ -50,7 +50,7 @@ describe('login function', () => {
       {
         httpMethod: 'POST',
         headers: { 'x-forwarded-proto': 'https' },
-        body: JSON.stringify({ username: 'rainbow', password: '050428' }),
+        body: JSON.stringify({ username: 'rainbow', password: 'test-password' }),
       },
       {
         env: {
@@ -60,6 +60,42 @@ describe('login function', () => {
     );
 
     expect(response.statusCode).toBe(200);
+  });
+
+  it('delays failed logins by 500ms to slow down brute force attempts', async () => {
+    vi.useFakeTimers();
+    try {
+      const { handler } = await import('../netlify/functions/login.js');
+
+      let settled = false;
+      const pending = handler(
+        {
+          httpMethod: 'POST',
+          headers: {},
+          body: JSON.stringify({ username: 'rainbow', password: 'wrong-guess' }),
+        },
+        {
+          env: {
+            APP_USERNAME: 'rainbow',
+            APP_PASSWORD: 'test-password',
+            SESSION_SECRET: 'test-secret-with-enough-length',
+          },
+        },
+      ).then((response) => {
+        settled = true;
+        return response;
+      });
+
+      await vi.advanceTimersByTimeAsync(499);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      const response = await pending;
+      expect(settled).toBe(true);
+      expect(response.statusCode).toBe(401);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -7,18 +7,18 @@ import {
 
 const env = {
   APP_USERNAME: 'rainbow',
-  APP_PASSWORD: '050428',
+  APP_PASSWORD: 'test-password',
   SESSION_SECRET: 'test-secret-with-enough-length',
 };
 
 describe('auth helpers', () => {
   it('accepts the configured single account', () => {
-    expect(validateCredentials('rainbow', '050428', env)).toBe(true);
+    expect(validateCredentials('rainbow', 'test-password', env)).toBe(true);
   });
 
   it('rejects wrong usernames or passwords', () => {
     expect(validateCredentials('rainbow', 'wrong', env)).toBe(false);
-    expect(validateCredentials('someone', '050428', env)).toBe(false);
+    expect(validateCredentials('someone', 'test-password', env)).toBe(false);
   });
 
   it('creates a signed session cookie that can be parsed', () => {
